@@ -1,0 +1,181 @@
+import { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType } from 'discord.js';
+import { Plan } from '../../storage/Plan.js';
+import { TicketPanel } from '../../storage/TicketPanel.js';
+import { GuildConfig } from '../../storage/GuildConfig.js';
+import { successEmbed, errorEmbed, planEmbed, embed, Colors } from '../../utils/embeds.js';
+
+function buyButtonFor(plan, panels) {
+  const purchasePanel = panels[0];
+  const purchaseType = purchasePanel?.ticketTypes?.find(t => t.label?.toLowerCase().includes('purchase')) ?? purchasePanel?.ticketTypes?.[0];
+  const btn = new ButtonBuilder()
+    .setLabel(`Buy ${plan.name}`)
+    .setEmoji(plan.emoji || '🛒')
+    .setStyle(ButtonStyle.Success);
+  if (purchasePanel && purchaseType) {
+    btn.setCustomId(`ticketopentype:${purchasePanel.id}:${purchaseType.id}`);
+  } else {
+    btn.setCustomId(`noop:${plan.id}`).setDisabled(true);
+  }
+  return btn;
+}
+
+export default {
+  data: new SlashCommandBuilder()
+    .setName('plan')
+    .setDescription('Manage hosting/service plans')
+    .addSubcommand(s => s.setName('create')
+      .setDescription('Create a new hosting plan and post it publicly')
+      .addStringOption(o => o.setName('name').setDescription('Plan name (e.g. Starter, Pro)').setRequired(true))
+      .addStringOption(o => o.setName('price').setDescription('Price (e.g. $5/mo)').setRequired(true))
+      .addStringOption(o => o.setName('ram').setDescription('RAM (e.g. 4GB)').setRequired(false))
+      .addStringOption(o => o.setName('cpu').setDescription('CPU (e.g. 2 vCores)').setRequired(false))
+      .addStringOption(o => o.setName('storage').setDescription('Storage (e.g. 20GB SSD)').setRequired(false))
+      .addStringOption(o => o.setName('slots').setDescription('Player slots (e.g. 20)').setRequired(false))
+      .addStringOption(o => o.setName('versions').setDescription('MC versions (e.g. 1.8-1.21)').setRequired(false))
+      .addStringOption(o => o.setName('description').setDescription('Plan description').setRequired(false))
+      .addStringOption(o => o.setName('emoji').setDescription('Plan emoji').setRequired(false))
+      .addStringOption(o => o.setName('discount').setDescription('Discount tag (e.g. 20% OFF)').setRequired(false))
+      .addStringOption(o => o.setName('thumbnail').setDescription('Logo URL (top-right of embed)').setRequired(false))
+      .addStringOption(o => o.setName('banner').setDescription('Banner image URL (bottom of embed)').setRequired(false))
+      .addChannelOption(o => o.setName('channel').setDescription('Channel to post in (default: configured plan channel)').addChannelTypes(ChannelType.GuildText).setRequired(false))
+      .addBooleanOption(o => o.setName('available').setDescription('Is this plan available?').setRequired(false)))
+    .addSubcommand(s => s.setName('delete')
+      .setDescription('Delete a hosting plan')
+      .addStringOption(o => o.setName('plan_id').setDescription('Plan ID to delete').setRequired(true)))
+    .addSubcommand(s => s.setName('list')
+      .setDescription('View all available plans')
+      .addBooleanOption(o => o.setName('public').setDescription('Post publicly in channel?').setRequired(false)))
+    .addSubcommand(s => s.setName('sales')
+      .setDescription('Post the professional sales panel with all plans')
+      .addChannelOption(o => o.setName('channel').setDescription('Channel to post in').addChannelTypes(ChannelType.GuildText).setRequired(false)))
+    .addSubcommand(s => s.setName('config')
+      .setDescription('Set the default channel where new plans get posted')
+      .addChannelOption(o => o.setName('channel').setDescription('Default plan channel').addChannelTypes(ChannelType.GuildText).setRequired(true))),
+
+  defaultLevel: 'admin',
+  subcommandDefaults: { list: 'public' },
+
+  async execute(interaction) {
+    const sub = interaction.options.getSubcommand();
+
+    // ── config ─────────────────────────────────────────────────────────────
+    if (sub === 'config') {
+      const ch = interaction.options.getChannel('channel');
+      GuildConfig.set(interaction.guild.id, { planChannel: ch.id });
+      return interaction.reply({
+        embeds: [successEmbed('Plan Channel Set', `New plans will be posted in <#${ch.id}> by default.`)],
+        flags: 64,
+      });
+    }
+
+    // ── create ─────────────────────────────────────────────────────────────
+    if (sub === 'create') {
+      const config = GuildConfig.get(interaction.guild.id);
+      const overrideCh = interaction.options.getChannel('channel');
+      const targetChannelId = overrideCh?.id ?? config.planChannel;
+
+      if (!targetChannelId) {
+        return interaction.reply({
+          embeds: [errorEmbed('No plan channel configured. Run `/plan config channel:#your-channel` first, or pass `channel:` when creating.')],
+          flags: 64,
+        });
+      }
+
+      const targetCh = interaction.guild.channels.cache.get(targetChannelId)
+        ?? await interaction.guild.channels.fetch(targetChannelId).catch(() => null);
+
+      if (!targetCh || !targetCh.isTextBased?.()) {
+        return interaction.reply({
+          embeds: [errorEmbed(`Configured plan channel <#${targetChannelId}> is missing or not a text channel. Update with \`/plan config\`.`)],
+          flags: 64,
+        });
+      }
+
+      const plan = Plan.create(interaction.guild.id, {
+        name: interaction.options.getString('name'),
+        price: interaction.options.getString('price'),
+        ram: interaction.options.getString('ram') ?? '',
+        cpu: interaction.options.getString('cpu') ?? '',
+        storage: interaction.options.getString('storage') ?? '',
+        slots: interaction.options.getString('slots') ?? '',
+        versions: interaction.options.getString('versions') ?? '',
+        description: interaction.options.getString('description') ?? '',
+        emoji: interaction.options.getString('emoji') ?? '🖥️',
+        discount: interaction.options.getString('discount') ?? '',
+        thumbnail: interaction.options.getString('thumbnail') ?? '',
+        banner: interaction.options.getString('banner') ?? '',
+        available: interaction.options.getBoolean('available') ?? true,
+      });
+
+      const panels = TicketPanel.forGuild(interaction.guild.id);
+      const row = new ActionRowBuilder().addComponents(buyButtonFor(plan, panels));
+
+      try {
+        await targetCh.send({ embeds: [planEmbed(plan)], components: [row] });
+      } catch {
+        return interaction.reply({
+          embeds: [errorEmbed(`Plan saved (ID \`${plan.id}\`) but I couldn't post in <#${targetCh.id}>. Check my **Send Messages** + **Embed Links** permissions there.`)],
+          flags: 64,
+        });
+      }
+
+      return interaction.reply({
+        embeds: [successEmbed('Plan Created', `Plan **${plan.name}** posted in <#${targetCh.id}>.\nID: \`${plan.id}\``)],
+        flags: 64,
+      });
+    }
+
+    // ── delete ─────────────────────────────────────────────────────────────
+    if (sub === 'delete') {
+      const id = interaction.options.getString('plan_id');
+      const plan = Plan.get(id);
+      if (!plan || plan.guildId !== interaction.guild.id) {
+        return interaction.reply({ embeds: [errorEmbed('Plan not found.')], flags: 64 });
+      }
+      Plan.delete(id);
+      return interaction.reply({ embeds: [successEmbed('Plan Deleted', `Plan **${plan.name}** has been deleted.`)], flags: 64 });
+    }
+
+    // ── list ───────────────────────────────────────────────────────────────
+    if (sub === 'list') {
+      const plans = Plan.forGuild(interaction.guild.id).filter(p => p.available);
+      if (plans.length === 0) {
+        return interaction.reply({ embeds: [embed({ description: 'No plans configured yet. Use `/plan create`.', color: Colors.warning })], flags: 64 });
+      }
+      const isPublic = interaction.options.getBoolean('public') ?? false;
+      const panels = TicketPanel.forGuild(interaction.guild.id);
+      const embeds = plans.slice(0, 10).map(p => planEmbed(p));
+      const buttons = plans.slice(0, 5).map(p => buyButtonFor(p, panels));
+      const rows = [];
+      for (let i = 0; i < buttons.length; i += 5) rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
+      return interaction.reply({ embeds, components: rows, flags: isPublic ? undefined : 64 });
+    }
+
+    // ── sales ──────────────────────────────────────────────────────────────
+    if (sub === 'sales') {
+      const ch = interaction.options.getChannel('channel') ?? interaction.channel;
+      const plans = Plan.forGuild(interaction.guild.id);
+      if (plans.length === 0) {
+        return interaction.reply({ embeds: [errorEmbed('No plans found. Use `/plan create` first.')], flags: 64 });
+      }
+      const panels = TicketPanel.forGuild(interaction.guild.id);
+      const header = embed({
+        title: '🎮 Minecraft Server Hosting Plans',
+        description: '**Premium hosting for your Minecraft server.**\nSelect a plan below and click **Buy Now** to open a support ticket and get started instantly!\n\n> 💡 All plans include **DDoS protection**, **24/7 uptime**, and **instant setup**.',
+        color: Colors.gold,
+        footer: 'Click Buy Now to open a purchase ticket • Prices subject to change',
+        timestamp: false,
+      });
+      const planEmbeds = plans.map(p => planEmbed(p));
+      const buttons = plans.slice(0, 5).map(p => buyButtonFor(p, panels));
+      const rows = [];
+      for (let i = 0; i < buttons.length; i += 5) rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
+      try {
+        await ch.send({ embeds: [header, ...planEmbeds.slice(0, 9)], components: rows });
+        return interaction.reply({ embeds: [embed({ description: `✅ Sales panel posted in <#${ch.id}>!`, color: Colors.success, timestamp: false })], flags: 64 });
+      } catch {
+        return interaction.reply({ embeds: [errorEmbed('Failed to post sales panel. Check my permissions.')], flags: 64 });
+      }
+    }
+  },
+};

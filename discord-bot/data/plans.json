@@ -1,0 +1,19 @@
+{
+  "15e1abdf-490e-4acb-b4a4-72826010e50f": {
+    "id": "15e1abdf-490e-4acb-b4a4-72826010e50f",
+    "guildId": "1489165519293644871",
+    "name": "core plan",
+    "price": "10000",
+    "ram": "4gb",
+    "cpu": "200%",
+    "storage": "10gb",
+    "slots": "10",
+    "versions": "1.1",
+    "description": "hello purchase the plan know its very cheap",
+    "emoji": "😊",
+    "available": true,
+    "discount": "40%",
+    "buyTicketType": "purchase",
+    "createdAt": 1776612783002
+  }
+}

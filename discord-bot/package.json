@@ -1,0 +1,16 @@
+{
+  "name": "@workspace/discord-bot",
+  "version": "1.0.0",
+  "description": "Minecraft server provider Discord bot",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "register": "node handlers/registerCommands.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5"
+  }
+}
