@@ -1,0 +1,185 @@
+Now do one final UX upgrade to the existing Discord bot.
+
+CURRENT PROBLEM:
+The main commands like /ticket do not work directly as a full entry point.
+Only subcommands exist, like:
+- /ticket create
+- /ticket delete
+- /ticket close
+etc.
+
+This is functional, but I want a much cleaner and more user-friendly command experience.
+
+==================================================
+GOAL
+==================================================
+
+I want the MAIN command itself to work as an interactive control panel.
+
+Example:
+When I type:
+/ticket
+
+and execute it,
+the bot should open a clean interactive panel/embed with buttons and/or select menus for all ticket actions in one place.
+
+Same concept can be used for other major systems where suitable.
+
+==================================================
+TICKET COMMAND REDESIGN
+==================================================
+
+Change the ticket system so that:
+
+1. /ticket by itself works
+2. It opens a Ticket Control Panel
+3. That panel contains actions such as:
+   - Create Ticket
+   - Close Ticket
+   - Delete Ticket
+   - Claim Ticket
+   - Unclaim Ticket
+   - Rename Ticket
+   - Add User
+   - Remove User
+   - Ticket Info
+   - Save Transcript
+   - Reopen Ticket (if enabled)
+
+The panel should be:
+- clean
+- modern
+- easy to understand
+- visually polished
+- optimized for admins and normal users
+
+==================================================
+IMPORTANT UX RULES
+==================================================
+
+- Do not force the user to remember many subcommands for common actions
+- The main command should act like a dashboard
+- Buttons and select menus should handle most actions
+- Use modals where text input is needed
+  Example:
+  - Rename Ticket -> modal
+  - Add user -> user select
+  - Remove user -> user select
+  - Close with reason -> modal or confirmation flow
+
+==================================================
+PERMISSION LOGIC
+==================================================
+
+The /ticket panel must adapt based on who uses it:
+
+If normal ticket creator uses /ticket inside their own ticket:
+- show Create Ticket if relevant
+- show Close Ticket
+- show Ticket Info
+- show Transcript if allowed
+
+If support/admin uses /ticket inside a ticket:
+- show Claim / Unclaim
+- show Rename
+- show Add User
+- show Remove User
+- show Delete Ticket
+- show Reopen if enabled
+- show Transcript
+- show Ticket Info
+
+If /ticket is used outside a ticket channel:
+- show only actions that make sense, like:
+  - Create Ticket
+  - View Ticket Help
+  - Ticket Panels / Available Categories
+  - Open setup/help reference if admin
+
+==================================================
+KEEP SUBCOMMANDS INTERNALLY IF NEEDED
+==================================================
+
+You may keep subcommand logic internally if needed for code organization,
+BUT the user-facing experience should prioritize the main /ticket command panel.
+
+If some subcommands still exist for advanced/manual use, that is okay,
+but /ticket must become the primary and easiest way to use the system.
+
+==================================================
+SETUP-TICKET SHOULD ALSO FOLLOW SAME PHILOSOPHY
+==================================================
+
+If useful, the same pattern should apply to other major commands:
+- /setup-ticket should open the setup dashboard
+- /plan can open plan management panel for admins
+- /review can open review tools panel if appropriate
+
+But focus first on /ticket.
+
+==================================================
+TECHNICAL REQUIREMENTS
+==================================================
+
+- Refactor the existing command structure cleanly
+- Do not break current slash commands
+- Do not remove current working ticket features
+- Reuse current interaction handlers where possible
+- Reuse storage/config system
+- Keep customId naming organized
+- Prevent interaction conflicts
+- Keep the system modular and optimized
+- Ensure buttons, selects, and modals work after bot restart
+- Avoid code duplication
+
+==================================================
+COMMAND BEHAVIOR REQUIREMENT
+==================================================
+
+I want this exact experience:
+
+User types:
+/ticket
+
+Bot responds with an embed like:
+"Ticket Control Panel"
+
+And shows action buttons/selects such as:
+- Create
+- Close
+- Claim
+- Rename
+- Add User
+- Remove User
+- Info
+- Transcript
+
+If needed, use multiple rows or a select menu for extra actions.
+
+==================================================
+DESIGN REQUIREMENT
+==================================================
+
+Make the panel look premium:
+- Nice embed
+- Good emoji usage
+- Clear labels
+- Smart descriptions
+- Professional support-bot style
+
+==================================================
+OUTPUT I WANT
+==================================================
+
+Provide:
+1. Updated /ticket command code
+2. Any needed interaction handler updates
+3. Button/select/modal flow for all ticket actions
+4. Permission-aware panel rendering
+5. Explanation of what changed
+6. Testing steps
+
+IMPORTANT:
+Do not just keep /ticket as an empty parent command.
+Make /ticket itself useful and interactive.
+The main command should open a unified panel where ticket create/delete/close/etc are available together.

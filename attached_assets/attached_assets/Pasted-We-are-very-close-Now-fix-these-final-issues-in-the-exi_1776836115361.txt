@@ -1,0 +1,142 @@
+We are very close. Now fix these final issues in the existing Discord bot professionally without breaking current working features.
+
+IMPORTANT:
+Do not rebuild the bot.
+Do not remove current features.
+Only patch and improve the existing code cleanly.
+
+==================================================
+ISSUE 1 — PLAN CREATE IS ONLY VISIBLE TO ME
+==================================================
+
+Right now when we create a hosting plan, the result is only visible to the command user and shows a dismiss message option.
+This is wrong.
+
+I want plan creation to work like this:
+1. Admin runs the command
+2. Bot saves the plan properly
+3. Bot posts the final public plan panel/embed in the configured target channel so everyone can see it
+4. Admin gets only a small success confirmation if needed
+
+Fix the cause:
+- Check if the command is replying with ephemeral: true
+- Check if followUp/editReply is being used incorrectly
+- Check if the plan message is only being sent as an interaction reply instead of channel.send()
+- Make sure the final plan embed is sent publicly to the selected/configured channel
+
+REQUIRED BEHAVIOR:
+- The actual plan panel must be visible to everyone in the channel
+- Only admin confirmation can be ephemeral if necessary
+- No useless dismiss-only message for the public plan result
+- If no plan channel is configured, show a proper error asking admin to configure it
+
+==================================================
+ISSUE 2 — REMOVE BAD DISMISS-STYLE UX
+==================================================
+
+Currently the plan output looks temporary/private and gives a dismiss feeling.
+Fix this UX.
+
+Required:
+- Public embeds/panels should be normal messages in the channel
+- Slash command acknowledgement can be short and clean
+- Avoid ugly temporary-only output for important plan panels
+- If using deferReply, make sure final public result is posted in channel and admin gets a clean success message like:
+  "Plan created and posted successfully."
+
+==================================================
+ISSUE 3 — PLAN EMBED DESIGN IMPROVEMENT
+==================================================
+
+Improve the hosting plan embed/panel design.
+
+I want:
+- A logo/image at the top-right side of the embed
+- Clean premium layout
+- Professional Minecraft hosting seller style
+
+Implementation:
+- Use embed thumbnail for logo at top-right
+- If a banner exists, use embed image for larger visual
+- Support both:
+  - plan logo / thumbnail
+  - optional banner image
+
+Plan embed should support fields like:
+- Plan Name
+- Price
+- RAM
+- CPU
+- Storage
+- Slots
+- Version Support
+- Description
+- Availability
+- Discount Tag
+
+Also:
+- Keep clean emoji usage
+- Make buy button clear and attractive
+- Keep the embed readable, not overcrowded
+
+==================================================
+ISSUE 4 — AFK COMMAND ADD
+==================================================
+
+Add a new AFK system with command support.
+
+Command:
+- /afk set <reason>
+- /afk remove
+Optional:
+- /afk status [user]
+
+Required AFK behavior:
+1. User sets AFK with a reason
+2. Bot stores AFK state properly in local storage / current storage system
+3. If someone mentions an AFK user, bot replies:
+   "<user> is currently AFK: <reason>"
+4. When AFK user sends a message again, AFK is automatically removed
+5. Bot should inform them that AFK has been removed
+6. Store timestamp so it can show:
+   "AFK since 10m ago" or similar
+
+AFK requirements:
+- Per guild support
+- Local JSON/file storage compatible
+- Lightweight
+- No spam
+- Cooldown or anti-spam protection on AFK mention responses
+- Ignore bots
+- Clean message formatting
+
+==================================================
+ISSUE 5 — KEEP STRUCTURE CLEAN
+==================================================
+
+While fixing this:
+- Reuse existing storage system
+- Reuse existing embed utility if present
+- Reuse existing command handler
+- Reuse existing interaction handler
+- Do not duplicate code
+- Do not break current ticket or plan systems
+
+==================================================
+ISSUE 6 — OUTPUT I WANT
+==================================================
+
+Provide:
+1. Updated/fixed plan create command
+2. Any updated storage/config file changes
+3. Updated embed builder for plans
+4. AFK command files
+5. AFK event/message listener logic
+6. Explanation of what was causing the plan visibility issue
+7. Testing steps
+
+IMPORTANT:
+- The public plan must go to the channel for everyone to see
+- The plan embed must show a top-right logo/thumbnail
+- Add AFK cleanly without bloating the bot
+- Do not break slash commands or ticket setup

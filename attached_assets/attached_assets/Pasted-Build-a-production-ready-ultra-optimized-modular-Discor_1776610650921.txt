@@ -1,0 +1,446 @@
+Build a production-ready, ultra-optimized, modular Discord bot for Minecraft server providers. The bot must be designed to help server hosts and Minecraft-related businesses sell their servers, manage support, and automate customer handling professionally.
+
+IMPORTANT GOAL:
+This bot must be lightweight, scalable, cleanly coded, and optimized for smooth performance without sacrificing features. Avoid unnecessary files, duplicate handlers, bloated architecture, or overengineering. Keep code compressed, modular, and easy to maintain.
+
+CRITICAL CHANGE:
+Remove MongoDB and mongoose completely.
+Do NOT remove any major features.
+Keep the full advanced feature set, but replace database persistence with:
+- JSON-based local storage
+- fs/promises
+- in-memory cache
+- debounced save system
+- safe file read/write helpers
+- startup data loading
+- automatic recovery for missing/corrupt files where possible
+
+TECH STACK:
+- Node.js
+- discord.js latest stable version
+- dotenv
+- fs/promises
+- Optional lightweight utility libraries only if truly needed
+- Use slash commands
+- Use buttons, select menus, modals, embeds, permission checks, and event handlers properly
+
+MAIN BOT PURPOSE:
+A multi-purpose Discord bot focused on Minecraft server providers, hosting sellers, SMP owners, setup service sellers, and support teams.
+
+CORE SYSTEMS TO BUILD:
+
+1. ADVANCED TICKET SYSTEM (MAIN FEATURE)
+Create a fully dynamic and customizable ticket system with all these features:
+
+A. Ticket Panel Customization
+Admins must be able to fully customize a ticket panel from Discord itself using slash commands / setup commands / modals:
+- Panel title
+- Panel description
+- Embed color
+- Footer
+- Thumbnail
+- Banner image
+- Emoji
+- Button label
+- Dropdown label
+- Dropdown placeholder
+- Support category
+- Allowed support roles
+- Ping roles
+- Ticket naming format
+- Panel channel
+- Ticket log channel
+- Transcript log channel
+- Ticket open message
+- Ticket close message
+
+B. Ticket Creation Types
+Support both:
+- Button-based ticket creation
+- Dropdown/select menu based ticket creation
+
+Admin must be able to choose:
+- Single button panel
+- Multi-button panel
+- Dropdown with multiple ticket types
+
+Examples of ticket types:
+- Purchase
+- Support
+- Bug Report
+- Partnership
+- Staff Application
+- Custom type defined by admin
+
+Each ticket type should support:
+- Custom emoji
+- Custom label
+- Custom description
+- Custom category
+- Custom support role
+- Custom questions if modal is enabled
+
+C. Ticket Modal System
+Admin can enable optional modal forms before ticket creation.
+Example fields:
+- Minecraft username
+- Problem summary
+- Hosting plan interested in
+- Budget
+- Server version
+- Extra details
+
+Admin should be able to customize modal fields per ticket type.
+
+D. Ticket Permissions
+When a ticket is created:
+- The user who opened the ticket can view and use it
+- Admins can view and manage it
+- Permitted support roles can view and manage it
+- Optional extra permitted members can be added
+- The ticket creator must have the right to close their own ticket
+- Admins can close tickets
+- Permitted support team members can close tickets
+
+E. Ticket Controls Inside Ticket
+Inside every ticket channel, send a control panel with buttons like:
+- Close Ticket
+- Claim Ticket
+- Unclaim Ticket
+- Add User
+- Remove User
+- Rename Ticket
+- Change Ticket Type
+- Save Transcript
+- Reopen Ticket (if enabled)
+- Delete Ticket
+
+Permission logic:
+- Ticket owner can close ticket
+- Admin/support can close ticket
+- Only support/admin can claim/unclaim
+- Only support/admin can add/remove users unless config allows otherwise
+
+F. Claim System
+- Staff can claim a ticket
+- Show claimed by whom
+- Prevent multiple claims if configured
+- Allow unclaim
+- Log claim/unclaim actions
+
+G. Close System
+When closing ticket:
+- Ask confirmation
+- Generate transcript
+- Send transcript to logs
+- Save metadata in local JSON storage
+- Optionally DM transcript summary to ticket creator
+- Delay before deletion configurable
+- Support close reason
+- Support closed by tracking
+- Save timestamps
+
+H. Ticket Cooldown + Delay System
+This is mandatory:
+- Admin can set cooldown per panel or ticket type
+- If user opens a ticket, they cannot create another ticket of the same configured type if blocked by rules
+- Admin can choose:
+  - Only 1 open ticket at a time
+  - Multiple open tickets allowed
+  - Cooldown after closing a ticket
+- Example:
+  user closes one ticket -> must wait X hours before opening another
+- Cooldown must be stored in local JSON files and survive bot restarts
+- Show friendly message telling remaining cooldown time
+
+I. Ticket Limits
+Support settings like:
+- Max open tickets per user
+- Max open tickets globally per panel
+- Restrict duplicate ticket types
+- Optional blacklist system for ticket creation
+- Optional account age requirement
+- Optional server join age requirement
+
+J. Ticket Transcripts
+Generate clean HTML transcript or clean formatted text transcript.
+Store:
+- Ticket creator
+- Staff involved
+- Open time
+- Close time
+- Claimed by
+- Ticket type
+- Reason
+- Full transcript metadata
+Send transcript to configured log channel.
+
+K. Ticket Logs
+Log all major actions:
+- Ticket created
+- Ticket closed
+- Ticket deleted
+- Ticket claimed
+- Ticket unclaimed
+- User added
+- User removed
+- Ticket renamed
+- Panel updated
+- Cooldown blocked
+- Permission denied attempts
+
+L. Ticket Config Management
+Admins need slash commands to:
+- Create ticket panel
+- Edit panel
+- Delete panel
+- Add ticket type
+- Edit ticket type
+- Remove ticket type
+- Set support roles
+- Set panel channel
+- Set log channel
+- Set transcripts channel
+- Set cooldown
+- Set max tickets
+- Enable or disable modal
+- Enable or disable claim system
+- Enable or disable transcript system
+- Enable or disable reopen system
+- Reset ticket config
+
+M. Ticket Data Persistence
+Replace MongoDB schemas with file-based storage collections or managers for:
+- Guild settings
+- Ticket panels
+- Ticket types
+- Ticket data
+- User cooldowns
+- Claim state
+- Transcript metadata
+
+2. SELLING / PROVIDER HELPER FEATURES
+Add useful features for Minecraft server providers:
+
+A. Product / Plan System
+Admins can create hosting plans or service plans with:
+- Name
+- Price
+- RAM
+- CPU
+- Storage
+- Slots
+- Version support
+- Description
+- Emoji
+- Availability
+- Discount tag
+- Buy button linked to ticket type
+
+B. Auto Sales Panel
+Create a professional sales panel where users can:
+- View plans
+- Compare plans
+- Click buy/support
+- Open pre-filled purchase tickets
+
+C. FAQ System
+Admins can create FAQ embeds for:
+- Server hosting plans
+- Node specs
+- Refund policy
+- Setup time
+- Payment methods
+- Supported Minecraft versions
+- Plugin support
+
+D. Review / Vouch System
+Users can submit vouches/reviews.
+Admins can approve them.
+Bot can post them to a vouch channel.
+
+E. Order Tracking System
+Optional lightweight order management:
+- Pending
+- In Progress
+- Delivered
+- Cancelled
+- Refunded
+Track customer orders in local JSON storage.
+
+3. GENERAL MULTI-PURPOSE FEATURES
+Also include lightweight but useful server provider utilities:
+- Welcome system
+- Auto-response system
+- Server info command
+- Ping command
+- Help command
+- Staff role check
+- Suggestion system
+- Basic moderation tools
+- Giveaway system only if lightweight
+- Announcement command
+- Embed builder command
+Do not bloat the bot. Keep only useful and performant features.
+
+4. ADMIN UX / CONTROL
+Make setup easy for non-coders.
+Provide slash commands like:
+- /setup-ticket
+- /ticket-panel-create
+- /ticket-panel-edit
+- /ticket-type-add
+- /ticket-settings
+- /ticket-close
+- /ticket-claim
+- /ticket-add
+- /ticket-remove
+- /ticket-rename
+- /ticket-transcript
+- /plan-create
+- /plan-list
+- /faq-create
+- /review-setup
+- /config-view
+
+All responses should be polished with embeds and ephemeral replies where appropriate.
+
+5. PERFORMANCE + OPTIMIZATION RULES
+This is very important:
+- Keep architecture modular but not bloated
+- No duplicate logic
+- Reuse utility functions
+- Centralize permission checks
+- Centralize embed styles
+- Centralize error handling
+- Avoid unnecessary collectors left running forever
+- Clean up collectors/timeouts properly
+- Use efficient local storage reads/writes
+- Cache only what helps
+- Load configs smartly
+- Prevent memory leaks
+- Prevent spam interaction errors
+- Use deferReply / update properly
+- Use lazy loading where useful
+- Avoid giant monolithic files, but also avoid too many tiny useless files
+- Use a practical folder structure
+- Use debounced writes so frequent ticket actions do not spam disk writes
+- Batch save where possible without risking data loss
+- Keep read/write helper functions centralized
+
+6. SECURITY + RELIABILITY
+- Validate all inputs
+- Prevent panel misuse
+- Prevent unauthorized ticket access
+- Prevent users from bypassing cooldowns
+- Prevent broken permissions after restart
+- Handle deleted channels gracefully
+- Handle missing roles/channels gracefully
+- Handle bot restart without corrupting state
+- Include anti-crash handling where reasonable
+- Use try/catch in critical places
+- Add useful console logs, but keep them clean
+- Detect and recreate missing JSON storage files automatically
+- Back up corrupted JSON files before resetting them if possible
+
+7. PROJECT STRUCTURE
+Use a clean optimized structure like:
+- commands/
+- events/
+- handlers/
+- storage/
+- utils/
+- config/
+- data/
+- transcripts/
+- index.js
+
+Do not generate junk files.
+Only create files that are actually used.
+
+8. STORAGE DESIGN
+Instead of mongoose models, create optimized file-based managers or repositories for:
+- GuildConfig
+- TicketPanel
+- TicketType
+- Ticket
+- TicketCooldown
+- ProductPlan
+- Review
+- Order
+
+Suggested files:
+- data/guilds.json
+- data/panels.json
+- data/tickets.json
+- data/cooldowns.json
+- data/plans.json
+- data/reviews.json
+- data/orders.json
+
+The code must abstract storage so future migration to MongoDB is easy if needed.
+
+9. USER EXPERIENCE
+Make the bot feel premium and professional:
+- Nice embeds
+- Clean buttons
+- Good emoji usage
+- Friendly errors
+- Strong admin feedback
+- Clear success messages
+- Human-readable cooldown messages
+- Professional sales-oriented wording for hosting providers
+
+10. FINAL OUTPUT REQUIREMENTS
+When generating this project:
+- Generate fully working code
+- Generate package.json
+- Generate .env.example
+- Do NOT generate MongoDB or mongoose setup
+- Register slash commands properly
+- Add startup handler
+- Add comments only where useful
+- Keep code readable and optimized
+- Do not leave placeholder fake logic
+- Do not skip important handlers
+- Ensure the ticket system actually works end-to-end
+
+11. EXTRA SMART FEATURES TO ADD
+Add some highly useful advanced features if they remain lightweight:
+- Ticket inactivity auto-close
+- Ticket priority tags
+- Transcript export button
+- Ticket search command
+- Staff performance stats
+- Daily/weekly ticket stats
+- Anti-duplicate ticket detection
+- Auto-tag ticket by purchase/support category
+- Ticket reopen within configurable time
+- Panel import/export config
+- Backup and restore config
+
+12. IMPORTANT CODING STYLE
+- Write complete code, not pseudo-code
+- Prefer maintainability and performance
+- Make code Replit-friendly
+- Use environment variables correctly
+- Keep installation simple
+- Bot should be easy to run with:
+  npm install
+  npm start
+
+13. VERY IMPORTANT IMPLEMENTATION RULE
+Do not remove features just because there is no database.
+Instead, implement the same behavior using file-based persistence.
+Any feature that originally required database persistence must now use local JSON storage and still survive bot restarts where applicable.
+
+At the end, provide:
+1. Full file structure
+2. Complete source code
+3. Setup steps
+4. File-based storage explanation
+5. Discord bot setup instructions
+6. How to deploy on Replit
+7. Example slash commands usage
+
+The final bot should feel like a premium Discord SaaS-style support and sales bot specifically for Minecraft server providers, but without any external database.

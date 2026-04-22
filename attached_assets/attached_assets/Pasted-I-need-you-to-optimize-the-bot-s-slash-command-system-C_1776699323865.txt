@@ -1,0 +1,91 @@
+I need you to optimize the bot’s slash command system.
+
+Current problem:
+
+* The bot currently has 22 commands
+* That is too many and feels cluttered
+* I want to reduce them to exactly 16 commands
+* No feature should be removed
+* Features must only be merged, reorganized, and made easier to use
+
+Main goal:
+Reduce command count from 22 to 16 by merging similar commands, using subcommands/options, and improving command UX.
+
+Strict rules:
+
+1. Do not remove any real functionality
+2. Do not cut any important feature
+3. Only merge overlapping commands
+4. Use subcommands and options instead of separate commands where possible
+5. Keep the system beginner-friendly
+6. Final commands must be easier to understand than before
+7. Avoid duplicate-purpose commands completely
+
+Optimization logic:
+
+* If two or more commands do similar work, merge them into one parent command
+* If a command has multiple versions, convert them into subcommands
+* If a command only differs by target/channel/mode, use options instead of making a separate command
+* Keep command names short, clean, and intuitive
+
+Examples of how to optimize:
+
+* Merge announcement-related commands into one `/announce` command with subcommands like:
+
+  * `/announce send`
+  * `/announce channel`
+  * `/announce preview`
+
+* Merge ticket setup/customization commands into one `/ticket` command with subcommands like:
+
+  * `/ticket setup`
+  * `/ticket panel`
+  * `/ticket close`
+  * `/ticket claim`
+  * `/ticket config`
+
+* Merge permission/lock related commands into one `/commandlock` command with subcommands like:
+
+  * `/commandlock set`
+  * `/commandlock view`
+  * `/commandlock list`
+  * `/commandlock reset`
+
+* Merge admin configuration commands into fewer grouped commands instead of many tiny separate commands
+
+Expected final result:
+
+* Exactly 16 top-level slash commands
+* All old features preserved
+* Similar commands merged smartly
+* Cleaner and more professional structure
+* Easier for both admins and normal users
+* Better discoverability inside Discord slash command menu
+
+Important:
+Before coding, first audit all existing 22 commands and identify:
+
+* which commands are duplicates
+* which commands can be merged
+* which commands should become subcommands
+* which commands should become options inside existing commands
+
+Then rebuild the final command structure.
+
+Output I want after the optimization:
+
+1. Old 22-command list
+2. New 16-command list
+3. Which commands were merged into which
+4. Confirmation that no features were removed
+5. Updated command architecture
+6. Any files changed
+7. Final registration structure for Discord slash commands
+
+Very important:
+Do not just rename commands.
+Do not hide features.
+Do not silently delete anything.
+Actually merge and optimize them properly.
+
+The final bot should feel compact, powerful, and easy to use.

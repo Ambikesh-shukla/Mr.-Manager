@@ -1,0 +1,134 @@
+You made a great bot overall, but now I need a full command system cleanup and permission redesign.
+
+Fix the bot professionally with these exact goals:
+
+1. Remove duplicate or near-duplicate commands
+
+* If two commands do almost the same thing with only tiny differences, merge them into one clean command.
+* Example: if there are two `/announce` commands and the only difference is that one sends to current channel and one sends to selected channel, do NOT keep both as separate confusing commands.
+* Instead, create one single smart command with options/subcommands.
+* Keep the command list clean, minimal, and easy to understand.
+
+2. Default command distribution system
+
+* By default, every command must be categorized into only these two groups:
+
+  * Admin commands
+  * Public/User commands
+* Do not randomly split commands into many unnecessary categories.
+* Keep the base structure simple and organized.
+
+3. Add a full Command Lock System
+   Create a powerful permission system where admins can decide who can use each command.
+
+For every command, admin should be able to set access mode as:
+
+* Public → everyone can use
+* Admin Only → only admins can use
+* Role Locked → only users with a specific role can use
+
+This system must work for all major commands.
+
+4. Command lock management panel
+   Create an admin setup system for command permissions, such as:
+
+* `/command-lock set <command> <mode>`
+* if mode is role locked, allow selecting a role
+* `/command-lock view <command>`
+* `/command-lock list`
+* `/command-lock reset <command>`
+
+Example:
+
+* `/command-lock set announce admin`
+* `/command-lock set ticket public`
+* `/command-lock set close role @SupportTeam`
+
+5. Centralized permission logic
+
+* Do NOT hardcode permissions separately inside every command file.
+* Build a centralized permission checker / middleware.
+* Every command should pass through the same permission validation system.
+* This makes the bot easier to manage and scale.
+
+6. Auto cleanup of similar commands
+   Review the full command list and:
+
+* detect commands with overlapping purpose
+* merge them into one cleaner command
+* remove outdated, redundant, or confusing variants
+* rename badly named commands into cleaner names if needed
+
+7. Better command design
+   For commands with multiple use cases, use:
+
+* subcommands
+* options
+* toggles
+  instead of making many duplicate slash commands.
+
+Example:
+Bad:
+
+* `/announce`
+* `/announce-channel`
+* `/announcement-send`
+  Good:
+* `/announce send`
+* `/announce preview`
+* `/announce channel`
+
+8. Admin-only and public-only default behavior
+
+* Rebuild the command registry so every command has a default access level:
+
+  * admin
+  * public
+* Then allow override using the command lock system
+* Role lock should be an optional advanced override
+
+9. Update slash command registration
+
+* Remove old duplicate slash commands from registration
+* Ensure only the final cleaned commands are registered
+* Prevent “command not found” and stale command issues
+* Make sure Discord application commands sync properly
+
+10. Backward cleanup
+
+* If old duplicate commands exist in code, delete or disable them cleanly
+* Do not leave dead code
+* Refactor command handler structure if needed
+
+11. UX goal
+    The final bot should feel like this:
+
+* fewer commands
+* clearer names
+* less confusion
+* stronger admin control
+* scalable permission management
+* easy for both server owners and normal members
+
+12. Important output requirement
+    After completing the fix, give me:
+
+* final command list
+* which commands are admin by default
+* which commands are public by default
+* which old duplicate commands were removed/merged
+* how the command lock system works
+* what files were changed
+
+Technical expectation:
+
+* keep code modular
+* keep command handler clean
+* use a config/database/json structure already used in this bot for command lock storage
+* make sure role-based permission checks are reliable
+* ensure admin bypass works
+* no broken imports
+* no stale command registration
+
+Main objective:
+Simplify the bot, remove similar commands, and create a powerful command lock system where admins control whether a command is admin-only, role-specific, or public.
