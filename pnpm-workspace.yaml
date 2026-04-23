@@ -36,8 +36,9 @@ minimumReleaseAgeExclude:
 
 packages:
   - api-server
-  - artifacts/*
-  - lib/*
+  - discord-bot
+  - mockup-sandbox
+  - lib/lib/*
   - lib/integrations/*
   - scripts
 
