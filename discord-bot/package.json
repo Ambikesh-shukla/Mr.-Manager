@@ -8,6 +8,7 @@
     "start": "node index.js",
     "dev": "node --watch index.js",
     "register": "node handlers/registerCommands.js",
+    "clear-commands": "node scripts/clear-commands.js",
     "fix-dupes": "node scripts/fix_duplicate_slash_cmds.js"
   },
   "dependencies": {
