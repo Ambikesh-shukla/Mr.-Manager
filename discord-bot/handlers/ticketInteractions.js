@@ -690,7 +690,7 @@ export async function handlePlanBuy(interaction, planId) {
   let targetPanel = null;
   let targetType = null;
   for (const panel of panels) {
-    const purchaseType = panel.ticketTypes?.find(t => t.label?.toLowerCase().includes('purchase'));
+    const purchaseType = panel.ticketTypes?.find(t => /\bpurchase\b/i.test(t.label));
     if (purchaseType) {
       targetPanel = panel;
       targetType = purchaseType;
