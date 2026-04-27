@@ -7,6 +7,7 @@ import { TicketPanel } from '../storage/TicketPanel.js';
 import { Ticket } from '../storage/Ticket.js';
 import { Cooldown } from '../storage/Cooldown.js';
 import { GuildConfig } from '../storage/GuildConfig.js';
+import { Plan } from '../storage/Plan.js';
 import { embed, successEmbed, errorEmbed, Colors } from '../utils/embeds.js';
 import { isAdmin, isStaff, canCloseTicket, canClaimTicket } from '../utils/permissions.js';
 import { generateTranscript } from '../utils/transcript.js';
@@ -668,4 +669,40 @@ export async function handlePanelSelect(interaction, panelId) {
 
   // Let openTicket handle its own defer — do NOT defer here
   await openTicket(interaction, panelId, ticketTypeId);
+}
+
+// ─── handle plan buy button ──────────────────────────────────────────────────
+export async function handlePlanBuy(interaction, planId) {
+  const plan = Plan.get(planId);
+  if (!plan || plan.guildId !== interaction.guild.id) {
+    return interaction.reply({ embeds: [errorEmbed('Plan not found.')], flags: 64 });
+  }
+
+  const panels = TicketPanel.forGuild(interaction.guild.id);
+  if (panels.length === 0) {
+    return interaction.reply({
+      embeds: [errorEmbed('No ticket panel is set up yet. Ask an admin to run `/panel create`.')],
+      flags: 64,
+    });
+  }
+
+  // Prefer a panel that has a ticket type labelled "purchase" (case-insensitive)
+  let targetPanel = null;
+  let targetType = null;
+  for (const panel of panels) {
+    const purchaseType = panel.ticketTypes?.find(t => t.label?.toLowerCase().includes('purchase'));
+    if (purchaseType) {
+      targetPanel = panel;
+      targetType = purchaseType;
+      break;
+    }
+  }
+
+  // Fall back to the first panel's first ticket type, or just the first panel
+  if (!targetPanel) {
+    targetPanel = panels[0];
+    targetType = targetPanel.ticketTypes?.[0] ?? null;
+  }
+
+  return openTicket(interaction, targetPanel.id, targetType?.id ?? null);
 }
