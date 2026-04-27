@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+
+import('./discord-bot/index.js').catch((error) => {
+  console.error('[launcher] Failed to start discord-bot/index.js');
+  console.error(error);
+  process.exit(1);
+});
