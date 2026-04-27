@@ -10,6 +10,7 @@ import {
   handleRenameTicket, handleRenameModal,
   handleDeleteTicket, handleTranscriptButton,
   handlePrioritySelect, handlePrioritySet,
+  handlePlanBuy,
 } from '../handlers/ticketInteractions.js';
 import {
   handleSetupMenu, handleSetupButton, handleSetupModal,
@@ -101,6 +102,8 @@ export default {
           if (action === 'transcript') return handleTranscriptButton(interaction, id);
           if (action === 'priority') return handlePrioritySelect(interaction, id);
         }
+
+        if (ns === 'plan_buy') return handlePlanBuy(interaction, action);
 
         if (ns === 'suggest') return interaction.deferUpdate();
 

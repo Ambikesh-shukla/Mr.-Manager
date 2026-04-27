@@ -1,22 +1,14 @@
 import { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType } from 'discord.js';
 import { Plan } from '../../storage/Plan.js';
-import { TicketPanel } from '../../storage/TicketPanel.js';
 import { GuildConfig } from '../../storage/GuildConfig.js';
 import { successEmbed, errorEmbed, planEmbed, embed, Colors } from '../../utils/embeds.js';
 
-function buyButtonFor(plan, panels) {
-  const purchasePanel = panels[0];
-  const purchaseType = purchasePanel?.ticketTypes?.find(t => t.label?.toLowerCase().includes('purchase')) ?? purchasePanel?.ticketTypes?.[0];
-  const btn = new ButtonBuilder()
+function buyButtonFor(plan) {
+  return new ButtonBuilder()
+    .setCustomId(`plan_buy:${plan.id}`)
     .setLabel(`Buy ${plan.name}`)
     .setEmoji(plan.emoji || '🛒')
     .setStyle(ButtonStyle.Success);
-  if (purchasePanel && purchaseType) {
-    btn.setCustomId(`ticketopentype:${purchasePanel.id}:${purchaseType.id}`);
-  } else {
-    btn.setCustomId(`noop:${plan.id}`).setDisabled(true);
-  }
-  return btn;
 }
 
 export default {
@@ -107,8 +99,7 @@ export default {
         available: interaction.options.getBoolean('available') ?? true,
       });
 
-      const panels = TicketPanel.forGuild(interaction.guild.id);
-      const row = new ActionRowBuilder().addComponents(buyButtonFor(plan, panels));
+      const row = new ActionRowBuilder().addComponents(buyButtonFor(plan));
 
       try {
         await targetCh.send({ embeds: [planEmbed(plan)], components: [row] });
@@ -143,9 +134,8 @@ export default {
         return interaction.reply({ embeds: [embed({ description: 'No plans configured yet. Use `/plan create`.', color: Colors.warning })], flags: 64 });
       }
       const isPublic = interaction.options.getBoolean('public') ?? false;
-      const panels = TicketPanel.forGuild(interaction.guild.id);
       const embeds = plans.slice(0, 10).map(p => planEmbed(p));
-      const buttons = plans.slice(0, 5).map(p => buyButtonFor(p, panels));
+      const buttons = plans.slice(0, 5).map(p => buyButtonFor(p));
       const rows = [];
       for (let i = 0; i < buttons.length; i += 5) rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
       return interaction.reply({ embeds, components: rows, flags: isPublic ? undefined : 64 });
@@ -158,7 +148,6 @@ export default {
       if (plans.length === 0) {
         return interaction.reply({ embeds: [errorEmbed('No plans found. Use `/plan create` first.')], flags: 64 });
       }
-      const panels = TicketPanel.forGuild(interaction.guild.id);
       const header = embed({
         title: '🎮 Minecraft Server Hosting Plans',
         description: '**Premium hosting for your Minecraft server.**\nSelect a plan below and click **Buy Now** to open a support ticket and get started instantly!\n\n> 💡 All plans include **DDoS protection**, **24/7 uptime**, and **instant setup**.',
@@ -167,7 +156,7 @@ export default {
         timestamp: false,
       });
       const planEmbeds = plans.map(p => planEmbed(p));
-      const buttons = plans.slice(0, 5).map(p => buyButtonFor(p, panels));
+      const buttons = plans.slice(0, 5).map(p => buyButtonFor(p));
       const rows = [];
       for (let i = 0; i < buttons.length; i += 5) rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
       try {
