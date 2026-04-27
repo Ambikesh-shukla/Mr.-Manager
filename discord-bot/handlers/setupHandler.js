@@ -29,13 +29,9 @@ const MENU_OPTIONS = [
 ];
 
 // ── Advanced-only options (shown under ⚙️ Advanced Settings) ──────────────────
-const ADVANCED_OPTIONS = [
-  { label: 'Set Ticket Name Format', value: 'nameformat', description: 'ticket-{username} / ticket-{number}', emoji: { name: '🏷️' } },
-  { label: 'Set Max Global Tickets', value: 'maxglobal', description: 'Max total open tickets (0 = unlimited)', emoji: { name: '🌐' } },
-  { label: 'Set Open Message', value: 'openmessage', description: 'Message shown inside new ticket channel', emoji: { name: '💬' } },
-  { label: 'Toggle Panel Type (button/dropdown)', value: 'toggletype', description: 'Switch between button and dropdown layout', emoji: { name: '🔘' } },
-  { label: 'Toggle Modal Questions', value: 'togglemodal', description: 'Ask questions when ticket is opened', emoji: { name: '❓' } },
-];
+// Derived from MENU_OPTIONS to avoid duplication
+const ADVANCED_OPTION_VALUES = new Set(['nameformat', 'maxglobal', 'openmessage', 'toggletype', 'togglemodal']);
+const ADVANCED_OPTIONS = MENU_OPTIONS.filter(o => ADVANCED_OPTION_VALUES.has(o.value));
 
 // ── Default ticket types for Quick Setup ─────────────────────────────────────
 const DEFAULT_TICKET_TYPES = () => [
@@ -734,9 +730,10 @@ export async function handleSetupModal(interaction, field) {
   }
 
   // ── Cooldown modal (2-field) ──────────────────────────────────────────────
+  // Handled separately so users can set both limits in one focused modal
   if (field === 'cooldown') {
-    const maxPerUser = Math.max(0, parseInt(interaction.fields.getTextInputValue('maxperuser') || '0') || 0);
-    const cooldownHours = Math.max(0, parseInt(interaction.fields.getTextInputValue('cooldownhours') || '0') || 0);
+    const maxPerUser = Math.max(0, parseInt(interaction.fields.getTextInputValue('maxperuser') || '0', 10) || 0);
+    const cooldownHours = Math.max(0, parseInt(interaction.fields.getTextInputValue('cooldownhours') || '0', 10) || 0);
     SetupSession.update(interaction.guild.id, interaction.user.id, { maxPerUser, cooldownHours });
     session = SetupSession.get(interaction.guild.id, interaction.user.id);
     return interaction.reply({ embeds: [buildDashboardEmbed(session)], components: buildDashboardComponents(), flags: 64 });
@@ -912,7 +909,7 @@ export async function handleSetupDashButton(interaction, action) {
     return interaction.update({
       embeds: [embed({
         title: '⚡ Quick Setup — Step 1 of 4',
-        description: '**Welcome to Quick Setup!**\nYou\'ll answer 4 simple questions and your ticket panel will be ready.\n\nFirst, select the **channel where the ticket panel will be posted** (a text channel visible to your members).',
+        description: "**Welcome to Quick Setup!**\nYou'll answer 4 simple questions and your ticket panel will be ready.\n\nFirst, select the **channel where the ticket panel will be posted** (a text channel visible to your members).",
         color: Colors.success, timestamp: false,
       })],
       components: buildChanSelectComponents('qs_panel'),
