@@ -16,6 +16,7 @@ import {
   handleSetupMenu, handleSetupButton, handleSetupModal,
   handleSetupChanSelect, handleSetupRoleSelect,
   handleSetupTypeSelect, handleSetupRemoveSelect,
+  handleSetupDashButton,
 } from '../handlers/setupHandler.js';
 import { Review } from '../storage/Review.js';
 import { GuildConfig } from '../storage/GuildConfig.js';
@@ -85,6 +86,7 @@ export default {
 
         if (ns === 'setup') {
           if (action === 'btn') return handleSetupButton(interaction, parts.slice(2).join(':'));
+          if (action === 'dash') return handleSetupDashButton(interaction, parts.slice(2).join(':'));
           return interaction.deferUpdate();
         }
 

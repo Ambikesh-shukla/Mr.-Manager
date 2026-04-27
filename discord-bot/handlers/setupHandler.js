@@ -28,6 +28,18 @@ const MENU_OPTIONS = [
   { label: 'Toggle Modal Questions', value: 'togglemodal', description: 'Ask questions when ticket is opened', emoji: { name: '❓' } },
 ];
 
+// ── Advanced-only options (shown under ⚙️ Advanced Settings) ──────────────────
+// Derived from MENU_OPTIONS to avoid duplication
+const ADVANCED_OPTION_VALUES = new Set(['nameformat', 'maxglobal', 'openmessage', 'toggletype', 'togglemodal']);
+const ADVANCED_OPTIONS = MENU_OPTIONS.filter(o => ADVANCED_OPTION_VALUES.has(o.value));
+
+// ── Default ticket types for Quick Setup ─────────────────────────────────────
+const DEFAULT_TICKET_TYPES = () => [
+  { id: randomUUID(), label: 'Support Ticket', emoji: '🎧', description: 'Get help from our support team', mode: 'button', questions: [] },
+  { id: randomUUID(), label: 'Purchase Ticket', emoji: '🛒', description: 'Purchase a plan or service', mode: 'button', questions: [] },
+  { id: randomUUID(), label: 'Bug Report', emoji: '🐛', description: 'Report a bug or issue', mode: 'button', questions: [] },
+];
+
 // ── Build the main setup embed ────────────────────────────────────────────────
 function buildSetupEmbed(session) {
   const chanOrNone = (id) => id ? `<#${id}>` : '`Not set`';
@@ -99,10 +111,13 @@ function buildMainComponents() {
 // ── Channel Select Page ───────────────────────────────────────────────────────
 function buildChanSelectComponents(field) {
   const meta = {
-    category:   { label: 'Select Category Channel',     types: [ChannelType.GuildCategory] },
-    logchan:    { label: 'Select Log Channel',           types: [ChannelType.GuildText] },
-    transcript: { label: 'Select Transcript Channel',   types: [ChannelType.GuildText] },
-    post:       { label: 'Select where to post panel',  types: [ChannelType.GuildText] },
+    category:     { label: 'Select Category Channel',          types: [ChannelType.GuildCategory] },
+    logchan:      { label: 'Select Log Channel',               types: [ChannelType.GuildText] },
+    transcript:   { label: 'Select Transcript Channel',        types: [ChannelType.GuildText] },
+    post:         { label: 'Select where to post panel',       types: [ChannelType.GuildText] },
+    qs_panel:     { label: 'Select panel channel (text)',      types: [ChannelType.GuildText] },
+    qs_category:  { label: 'Select ticket category',           types: [ChannelType.GuildCategory] },
+    qs_log:       { label: 'Select log channel (optional)',    types: [ChannelType.GuildText] },
   };
   const m = meta[field] ?? { label: 'Select a channel', types: [ChannelType.GuildText] };
   return [
@@ -166,9 +181,175 @@ function buildTypeEditComponents(typeId) {
   ];
 }
 
-// ── Refresh main panel ────────────────────────────────────────────────────────
+// ── NEW: Dashboard embed ──────────────────────────────────────────────────────
+function buildDashboardEmbed(session) {
+  const chanOrNone = (id) => id ? `<#${id}>` : '`Not set`';
+  const roles = session.allowedRoles?.length > 0
+    ? session.allowedRoles.map(r => `<@&${r}>`).join(', ')
+    : '`Not set`';
+  let color = Colors.primary;
+  if (session.color) {
+    try { color = parseInt(session.color.replace('#', ''), 16); } catch {}
+  }
+
+  return new EmbedBuilder()
+    .setTitle('🎫 Ticket Panel Setup')
+    .setDescription(
+      '**Use the buttons below to configure your ticket panel.**\n' +
+      '> ⚡ **Quick Setup** — Get everything set up in under a minute\n' +
+      '> 🎨 **Customize** — Title, description, color & logo\n' +
+      '> 🎫 **Ticket Types** — Add Support, Purchase, Bug Report etc.\n' +
+      '> 📤 **Publish Panel** — Post the finished panel in a channel\n\u200b'
+    )
+    .setColor(color)
+    .addFields(
+      { name: '📝 Title', value: `\`${session.title || 'Support Tickets'}\``, inline: true },
+      { name: '🎨 Color', value: `\`${session.color || '#5865F2'}\``, inline: true },
+      { name: '🎫 Ticket Types', value: `\`${session.ticketTypes?.length ?? 0}\``, inline: true },
+      { name: '👥 Support Roles', value: roles, inline: true },
+      { name: '📋 Log Channel', value: chanOrNone(session.logChannel), inline: true },
+      { name: '📁 Category', value: chanOrNone(session.supportCategory), inline: true },
+      { name: '⏰ Cooldown', value: session.cooldownHours > 0 ? `\`${session.cooldownHours}h\`` : '`Off`', inline: true },
+      { name: '🔢 Max / User', value: `\`${session.maxPerUser || 'Unlimited'}\``, inline: true },
+      { name: '🔘 Layout', value: `\`${session.panelType}\``, inline: true },
+    )
+    .setFooter({ text: session._editingPanelId ? '✏️ Editing existing panel' : '🆕 New panel  •  Click 📤 Publish Panel when ready' })
+    .setTimestamp();
+}
+
+// ── NEW: Dashboard components ─────────────────────────────────────────────────
+function buildDashboardComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('setup:dash:quicksetup').setLabel('Quick Setup').setEmoji('⚡').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('setup:dash:customize').setLabel('Customize Panel').setEmoji('🎨').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('setup:dash:types').setLabel('Ticket Types').setEmoji('🎫').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('setup:dash:roles').setLabel('Support Roles').setEmoji('👥').setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('setup:dash:logs').setLabel('Logs').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('setup:dash:cooldown').setLabel('Cooldown').setEmoji('⏰').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('setup:dash:advanced').setLabel('Advanced').setEmoji('⚙️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('setup:dash:preview').setLabel('Preview').setEmoji('👁️').setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('setup:dash:publish').setLabel('Publish Panel').setEmoji('📤').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('setup:dash:cancel').setLabel('Cancel').setEmoji('❌').setStyle(ButtonStyle.Danger),
+    ),
+  ];
+}
+
+// ── NEW: Customize sub-panel ──────────────────────────────────────────────────
+function buildCustomizeEmbed(session) {
+  let color = Colors.primary;
+  if (session.color) {
+    try { color = parseInt(session.color.replace('#', ''), 16); } catch {}
+  }
+  return new EmbedBuilder()
+    .setTitle('🎨 Customize Panel')
+    .setDescription('Set the look and feel of your ticket panel.')
+    .setColor(color)
+    .addFields(
+      { name: '📝 Title', value: `\`${session.title || 'Support Tickets'}\``, inline: true },
+      { name: '🎨 Color', value: `\`${session.color || '#5865F2'}\``, inline: true },
+      { name: '📋 Footer', value: session.footer ? `\`${session.footer.slice(0, 60)}\`` : '`Not set`', inline: true },
+      { name: '📄 Description', value: session.description ? `\`${session.description.slice(0, 80)}${session.description.length > 80 ? '…' : ''}\`` : '`Not set`', inline: false },
+      { name: '🖼️ Image/Logo URL', value: (session.thumbnail || session.banner) ? '`Set`' : '`Not set`', inline: true },
+    )
+    .setTimestamp();
+}
+
+function buildCustomizeComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('setup:dash:cust_title').setLabel('Title').setEmoji('📝').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('setup:dash:cust_desc').setLabel('Description').setEmoji('📄').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('setup:dash:cust_color').setLabel('Color').setEmoji('🎨').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('setup:dash:cust_image').setLabel('Image/Logo').setEmoji('🖼️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('setup:dash:cust_footer').setLabel('Footer').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('setup:dash:back').setLabel('Back to Dashboard').setEmoji('⬅️').setStyle(ButtonStyle.Primary),
+    ),
+  ];
+}
+
+// ── NEW: Ticket Types sub-panel ───────────────────────────────────────────────
+function buildTypesEmbed(session) {
+  const types = session.ticketTypes ?? [];
+  const typeList = types.length > 0
+    ? types.map(t => `${t.emoji ?? '🎫'} **${t.label}** *(${t.mode ?? 'button'})*`).join('\n')
+    : '*No ticket types yet.*\nAdd at least one type so users can choose what kind of ticket to open.';
+
+  return new EmbedBuilder()
+    .setTitle('🎫 Ticket Types')
+    .setDescription('Manage the types of tickets users can open.\n\u200b')
+    .setColor(Colors.primary)
+    .addFields({ name: `Current Types (${types.length})`, value: typeList, inline: false })
+    .setTimestamp();
+}
+
+function buildTypesComponents(session) {
+  const hasTypes = (session.ticketTypes?.length ?? 0) > 0;
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('setup:dash:types_add').setLabel('Add Type').setEmoji('➕').setStyle(ButtonStyle.Success),
+    ...(hasTypes ? [
+      new ButtonBuilder().setCustomId('setup:dash:types_edit').setLabel('Edit Type').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('setup:dash:types_remove').setLabel('Remove Type').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+    ] : []),
+  );
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('setup:dash:back').setLabel('Back to Dashboard').setEmoji('⬅️').setStyle(ButtonStyle.Primary),
+  );
+  return [row1, row2];
+}
+
+// ── NEW: Cooldown modal (2-field) ─────────────────────────────────────────────
+function buildCooldownModal(session) {
+  const modal = new ModalBuilder().setCustomId('setup:modal:cooldown').setTitle('⏰ Cooldown Settings');
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('maxperuser')
+        .setLabel('Max open tickets per user (0 = unlimited)')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setPlaceholder('1')
+        .setMaxLength(4)
+        .setValue(String(session.maxPerUser ?? 1))
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('cooldownhours')
+        .setLabel('Cooldown hours after closing (0 = off)')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setPlaceholder('0')
+        .setMaxLength(4)
+        .setValue(String(session.cooldownHours ?? 0))
+    ),
+  );
+  return modal;
+}
+
+// ── NEW: QS role-select row ───────────────────────────────────────────────────
+function buildQsRoleSelectComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new RoleSelectMenuBuilder()
+        .setCustomId('setup:role:qs_support')
+        .setPlaceholder('Select support roles…')
+        .setMinValues(0).setMaxValues(10)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('setup:btn:back').setLabel('Back').setEmoji('⬅️').setStyle(ButtonStyle.Secondary)
+    ),
+  ];
+}
+
+// ── Refresh main panel (now shows new dashboard) ──────────────────────────────
 async function refreshPanel(interaction, session) {
-  const payload = { embeds: [buildSetupEmbed(session)], components: buildMainComponents() };
+  const payload = { embeds: [buildDashboardEmbed(session)], components: buildDashboardComponents() };
   if (interaction.isMessageComponent()) return interaction.update(payload);
   return interaction.reply({ ...payload, flags: 64 });
 }
@@ -389,8 +570,8 @@ export async function startSetup(interaction, existingPanelId = null) {
   }
 
   await interaction.reply({
-    embeds: [buildSetupEmbed(session)],
-    components: buildMainComponents(),
+    embeds: [buildDashboardEmbed(session)],
+    components: buildDashboardComponents(),
     flags: 64,
   });
 }
@@ -535,7 +716,7 @@ export async function handleSetupModal(interaction, field) {
       ticketTypes: [...(session.ticketTypes ?? []), { id: randomUUID(), ...typeData }],
     });
     session = SetupSession.get(interaction.guild.id, interaction.user.id);
-    return interaction.reply({ embeds: [buildSetupEmbed(session)], components: buildMainComponents(), flags: 64 });
+    return interaction.reply({ embeds: [buildTypesEmbed(session)], components: buildTypesComponents(session), flags: 64 });
   }
 
   if (field.startsWith('edittype:')) {
@@ -545,12 +726,22 @@ export async function handleSetupModal(interaction, field) {
       ticketTypes: (session.ticketTypes ?? []).map(t => t.id === typeId ? { ...t, ...typeData } : t),
     });
     session = SetupSession.get(interaction.guild.id, interaction.user.id);
-    return interaction.reply({ embeds: [buildSetupEmbed(session)], components: buildMainComponents(), flags: 64 });
+    return interaction.reply({ embeds: [buildTypesEmbed(session)], components: buildTypesComponents(session), flags: 64 });
+  }
+
+  // ── Cooldown modal (2-field) ──────────────────────────────────────────────
+  // Handled separately so users can set both limits in one focused modal
+  if (field === 'cooldown') {
+    const maxPerUser = Math.max(0, parseInt(interaction.fields.getTextInputValue('maxperuser') || '0', 10) || 0);
+    const cooldownHours = Math.max(0, parseInt(interaction.fields.getTextInputValue('cooldownhours') || '0', 10) || 0);
+    SetupSession.update(interaction.guild.id, interaction.user.id, { maxPerUser, cooldownHours });
+    session = SetupSession.get(interaction.guild.id, interaction.user.id);
+    return interaction.reply({ embeds: [buildDashboardEmbed(session)], components: buildDashboardComponents(), flags: 64 });
   }
 
   const value = interaction.fields.getTextInputValue('value')?.trim() ?? '';
 
-  const numericMap = { cooldown: 'cooldownHours', maxperuser: 'maxPerUser', maxglobal: 'maxGlobal' };
+  const numericMap = { maxperuser: 'maxPerUser', maxglobal: 'maxGlobal' };
   const textMap = { title: 'title', description: 'description', color: 'color', footer: 'footer', thumbnail: 'thumbnail', banner: 'banner', nameformat: 'namingFormat', openmessage: 'openMessage' };
 
   if (numericMap[field] !== undefined) {
@@ -563,7 +754,12 @@ export async function handleSetupModal(interaction, field) {
   }
 
   session = SetupSession.get(interaction.guild.id, interaction.user.id);
-  await interaction.reply({ embeds: [buildSetupEmbed(session)], components: buildMainComponents(), flags: 64 });
+  // After customise modals, return to the customize sub-panel for smooth UX
+  const customizeFields = ['title', 'description', 'color', 'footer', 'thumbnail', 'banner'];
+  if (customizeFields.includes(field)) {
+    return interaction.reply({ embeds: [buildCustomizeEmbed(session)], components: buildCustomizeComponents(), flags: 64 });
+  }
+  await interaction.reply({ embeds: [buildDashboardEmbed(session)], components: buildDashboardComponents(), flags: 64 });
 }
 
 // ── Channel select ────────────────────────────────────────────────────────────
@@ -573,15 +769,53 @@ export async function handleSetupChanSelect(interaction, field) {
 
   const channelId = interaction.values[0];
 
+  // ── Standard post (publish) ──────────────────────────────────────────────
   if (field === 'post') return finalizePanel(interaction, session, channelId);
 
+  // ── Quick Setup steps ─────────────────────────────────────────────────────
+  if (field === 'qs_panel') {
+    SetupSession.update(interaction.guild.id, interaction.user.id, { _qsPanelChannel: channelId });
+    return interaction.update({
+      embeds: [embed({
+        title: '⚡ Quick Setup — Step 2 of 4',
+        description: 'Select the **ticket category** where ticket channels will be created.\n*(You can create a new category in Discord first if needed.)*',
+        color: Colors.success, timestamp: false,
+      })],
+      components: buildChanSelectComponents('qs_category'),
+    });
+  }
+
+  if (field === 'qs_category') {
+    SetupSession.update(interaction.guild.id, interaction.user.id, { supportCategory: channelId });
+    return interaction.update({
+      embeds: [embed({
+        title: '⚡ Quick Setup — Step 3 of 4',
+        description: 'Select the **support role** that can view and manage tickets.\n*(Staff who should be able to see ticket channels.)*',
+        color: Colors.success, timestamp: false,
+      })],
+      components: buildQsRoleSelectComponents(),
+    });
+  }
+
+  if (field === 'qs_log') {
+    SetupSession.update(interaction.guild.id, interaction.user.id, { logChannel: channelId });
+    const updated = SetupSession.get(interaction.guild.id, interaction.user.id);
+    // Add default ticket types if none configured yet
+    if (!updated.ticketTypes || updated.ticketTypes.length === 0) {
+      SetupSession.update(interaction.guild.id, interaction.user.id, { ticketTypes: DEFAULT_TICKET_TYPES() });
+    }
+    const finalSession = SetupSession.get(interaction.guild.id, interaction.user.id);
+    return finalizePanel(interaction, finalSession, finalSession._qsPanelChannel);
+  }
+
+  // ── Standard field updates ────────────────────────────────────────────────
   const fieldMap = { category: 'supportCategory', logchan: 'logChannel', transcript: 'transcriptChannel' };
   if (fieldMap[field]) {
     SetupSession.update(interaction.guild.id, interaction.user.id, { [fieldMap[field]]: channelId });
   }
 
   const updated = SetupSession.get(interaction.guild.id, interaction.user.id);
-  return interaction.update({ embeds: [buildSetupEmbed(updated)], components: buildMainComponents() });
+  return interaction.update({ embeds: [buildDashboardEmbed(updated)], components: buildDashboardComponents() });
 }
 
 // ── Role select ───────────────────────────────────────────────────────────────
@@ -589,9 +823,25 @@ export async function handleSetupRoleSelect(interaction) {
   const session = SetupSession.get(interaction.guild.id, interaction.user.id);
   if (!session) return interaction.reply({ embeds: [errorEmbed('Setup session expired.')], flags: 64 });
 
+  const parts = interaction.customId.split(':');
+  const field = parts[2]; // 'support' or 'qs_support'
+
   SetupSession.update(interaction.guild.id, interaction.user.id, { allowedRoles: interaction.values });
+
+  // ── Quick Setup step 3 → step 4 ──────────────────────────────────────────
+  if (field === 'qs_support') {
+    return interaction.update({
+      embeds: [embed({
+        title: '⚡ Quick Setup — Step 4 of 4',
+        description: 'Almost done! Select the **log channel** where ticket activity will be recorded.\n*(All opens, closes, and transcripts go here.)*',
+        color: Colors.success, timestamp: false,
+      })],
+      components: buildChanSelectComponents('qs_log'),
+    });
+  }
+
   const updated = SetupSession.get(interaction.guild.id, interaction.user.id);
-  return interaction.update({ embeds: [buildSetupEmbed(updated)], components: buildMainComponents() });
+  return interaction.update({ embeds: [buildDashboardEmbed(updated)], components: buildDashboardComponents() });
 }
 
 // ── Type manage select (edit flow) ────────────────────────────────────────────
@@ -627,5 +877,176 @@ export async function handleSetupRemoveSelect(interaction) {
   const updated = SetupSession.update(interaction.guild.id, interaction.user.id, {
     ticketTypes: session.ticketTypes.filter(t => t.id !== typeId),
   });
-  return interaction.update({ embeds: [buildSetupEmbed(updated)], components: buildMainComponents() });
+  return interaction.update({ embeds: [buildTypesEmbed(updated)], components: buildTypesComponents(updated) });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NEW: Dashboard button handler (setup:dash:*)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export async function handleSetupDashButton(interaction, action) {
+  const session = SetupSession.get(interaction.guild.id, interaction.user.id);
+  if (!session) {
+    return interaction.reply({ embeds: [errorEmbed('Setup session expired. Run `/setup-ticket` or `/panel create` again.')], flags: 64 });
+  }
+
+  // ── Back to main dashboard ──────────────────────────────────────────────────
+  if (action === 'back') {
+    return interaction.update({ embeds: [buildDashboardEmbed(session)], components: buildDashboardComponents() });
+  }
+
+  // ── Cancel ──────────────────────────────────────────────────────────────────
+  if (action === 'cancel') {
+    SetupSession.delete(interaction.guild.id, interaction.user.id);
+    return interaction.update({
+      embeds: [embed({ title: '❌ Setup Cancelled', description: 'Panel setup cancelled. No changes were saved.', color: Colors.error, timestamp: false })],
+      components: [],
+    });
+  }
+
+  // ── Quick Setup ─────────────────────────────────────────────────────────────
+  if (action === 'quicksetup') {
+    return interaction.update({
+      embeds: [embed({
+        title: '⚡ Quick Setup — Step 1 of 4',
+        description: "**Welcome to Quick Setup!**\nYou'll answer 4 simple questions and your ticket panel will be ready.\n\nFirst, select the **channel where the ticket panel will be posted** (a text channel visible to your members).",
+        color: Colors.success, timestamp: false,
+      })],
+      components: buildChanSelectComponents('qs_panel'),
+    });
+  }
+
+  // ── Customize Panel ─────────────────────────────────────────────────────────
+  if (action === 'customize') {
+    return interaction.update({
+      embeds: [buildCustomizeEmbed(session)],
+      components: buildCustomizeComponents(),
+    });
+  }
+
+  // ── Customize field modals ─────────────────────────────────────────────────
+  const customizeModalMap = {
+    cust_title:  { field: 'title',       label: 'Panel Title',           placeholder: 'Support Tickets',                   current: session.title,          max: 100 },
+    cust_desc:   { field: 'description', label: 'Panel Description',     placeholder: 'Click below to open a ticket.',     current: session.description,    max: 4000, long: true },
+    cust_color:  { field: 'color',       label: 'Embed Color (hex)',      placeholder: '#5865F2',                           current: session.color,          max: 7 },
+    cust_image:  { field: 'banner',      label: 'Image/Logo URL',        placeholder: 'https://example.com/banner.png',    current: session.banner,         max: 500 },
+    cust_footer: { field: 'footer',      label: 'Footer Text',           placeholder: 'Response time: within 24 hours',   current: session.footer,         max: 200 },
+  };
+  if (customizeModalMap[action]) {
+    const cfg = customizeModalMap[action];
+    const modal = new ModalBuilder().setCustomId(`setup:modal:${cfg.field}`).setTitle(cfg.label.slice(0, 45));
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('value')
+          .setLabel(cfg.label.slice(0, 45))
+          .setStyle(cfg.long ? TextInputStyle.Paragraph : TextInputStyle.Short)
+          .setRequired(false)
+          .setPlaceholder(cfg.placeholder)
+          .setMaxLength(cfg.max)
+          .setValue(cfg.current ?? '')
+      )
+    );
+    return interaction.showModal(modal);
+  }
+
+  // ── Ticket Types ────────────────────────────────────────────────────────────
+  if (action === 'types') {
+    return interaction.update({ embeds: [buildTypesEmbed(session)], components: buildTypesComponents(session) });
+  }
+
+  if (action === 'types_add') {
+    return interaction.showModal(buildAddTypeModal());
+  }
+
+  if (action === 'types_edit') {
+    const comps = buildTypeListComponents(session, 'manage');
+    if (!comps) return interaction.reply({ embeds: [errorEmbed('No ticket types yet. Use **➕ Add Type** first.')], flags: 64 });
+    return interaction.update({
+      embeds: [embed({ title: '✏️ Edit Ticket Type', description: 'Select a type to edit it.', color: Colors.primary, timestamp: false })],
+      components: comps,
+    });
+  }
+
+  if (action === 'types_remove') {
+    const comps = buildTypeListComponents(session, 'remove');
+    if (!comps) return interaction.reply({ embeds: [errorEmbed('No ticket types to remove.')], flags: 64 });
+    return interaction.update({
+      embeds: [embed({ title: '🗑️ Remove Ticket Type', description: 'Select a type to permanently remove it.', color: Colors.error, timestamp: false })],
+      components: comps,
+    });
+  }
+
+  // ── Support Roles ───────────────────────────────────────────────────────────
+  if (action === 'roles') {
+    return interaction.update({
+      embeds: [embed({ title: '👥 Support Roles', description: 'Select the roles that can view and manage tickets.\nSelect **0 roles** to clear all roles.', color: Colors.primary, timestamp: false })],
+      components: buildRoleSelectComponents(),
+    });
+  }
+
+  // ── Logs ────────────────────────────────────────────────────────────────────
+  if (action === 'logs') {
+    return interaction.update({
+      embeds: [embed({ title: '📋 Log Channel', description: 'Select the channel where ticket activity (opens, closes, transcripts) will be logged.', color: Colors.primary, timestamp: false })],
+      components: buildChanSelectComponents('logchan'),
+    });
+  }
+
+  // ── Cooldown ────────────────────────────────────────────────────────────────
+  if (action === 'cooldown') {
+    return interaction.showModal(buildCooldownModal(session));
+  }
+
+  // ── Advanced Settings ───────────────────────────────────────────────────────
+  if (action === 'advanced') {
+    return interaction.update({
+      embeds: [embed({
+        title: '⚙️ Advanced Settings',
+        description: 'These settings are optional and mostly for power users.\nUse the menu below to configure advanced options.',
+        color: Colors.primary, timestamp: false,
+        fields: [
+          { name: '🏷️ Ticket Name Format', value: `\`${session.namingFormat ?? 'ticket-{username}'}\``, inline: true },
+          { name: '🌐 Max Global Tickets', value: `\`${session.maxGlobal || 'Unlimited'}\``, inline: true },
+          { name: '❓ Modal Questions', value: session.modalEnabled ? '`ON`' : '`OFF`', inline: true },
+          { name: '🔘 Layout', value: `\`${session.panelType}\``, inline: true },
+          { name: '📝 Transcript Channel', value: session.transcriptChannel ? `<#${session.transcriptChannel}>` : '`Not set`', inline: true },
+        ],
+      })],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId('setup:menu')
+            .setPlaceholder('⚙️ Configure advanced settings…')
+            .addOptions(ADVANCED_OPTIONS)
+        ),
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('setup:btn:transcript').setLabel('Transcript Channel').setEmoji('📝').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('setup:dash:back').setLabel('Back to Dashboard').setEmoji('⬅️').setStyle(ButtonStyle.Primary),
+        ),
+      ],
+    });
+  }
+
+  // ── Preview ─────────────────────────────────────────────────────────────────
+  if (action === 'preview') {
+    return interaction.reply({
+      embeds: [
+        embed({ title: '👁️ Panel Preview', description: 'This is exactly how your panel will look when posted:', color: Colors.info, timestamp: false }),
+        buildPreviewEmbed(session),
+      ],
+      components: buildPreviewComponents(session),
+      flags: 64,
+    });
+  }
+
+  // ── Publish Panel ───────────────────────────────────────────────────────────
+  if (action === 'publish') {
+    return interaction.update({
+      embeds: [embed({ title: '📤 Publish Panel', description: 'Select the channel where the ticket panel will be posted.\nUsers will click buttons in this channel to open tickets.', color: Colors.success, timestamp: false })],
+      components: buildChanSelectComponents('post'),
+    });
+  }
+
+  return interaction.deferUpdate();
 }
