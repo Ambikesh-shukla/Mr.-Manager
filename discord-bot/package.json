@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "register": "node handlers/registerCommands.js"
+    "register": "node handlers/registerCommands.js",
+    "fix-dupes": "node scripts/fix_duplicate_slash_cmds.js"
   },
   "dependencies": {
     "discord.js": "^14.16.3",
