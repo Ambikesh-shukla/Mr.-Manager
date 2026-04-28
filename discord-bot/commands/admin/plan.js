@@ -37,9 +37,6 @@ export default {
     .addSubcommand(s => s.setName('list')
       .setDescription('View all available plans')
       .addBooleanOption(o => o.setName('public').setDescription('Post publicly in channel?').setRequired(false)))
-    .addSubcommand(s => s.setName('sales')
-      .setDescription('Post the professional sales panel with all plans')
-      .addChannelOption(o => o.setName('channel').setDescription('Channel to post in').addChannelTypes(ChannelType.GuildText).setRequired(false)))
     .addSubcommand(s => s.setName('config')
       .setDescription('Set the default channel where new plans get posted')
       .addChannelOption(o => o.setName('channel').setDescription('Default plan channel').addChannelTypes(ChannelType.GuildText).setRequired(true))),
@@ -141,30 +138,5 @@ export default {
       return interaction.reply({ embeds, components: rows, flags: isPublic ? undefined : 64 });
     }
 
-    // ── sales ──────────────────────────────────────────────────────────────
-    if (sub === 'sales') {
-      const ch = interaction.options.getChannel('channel') ?? interaction.channel;
-      const plans = Plan.forGuild(interaction.guild.id);
-      if (plans.length === 0) {
-        return interaction.reply({ embeds: [errorEmbed('No plans found. Use `/plan create` first.')], flags: 64 });
-      }
-      const header = embed({
-        title: '🎮 Minecraft Server Hosting Plans',
-        description: '**Premium hosting for your Minecraft server.**\nSelect a plan below and click **Buy Now** to open a support ticket and get started instantly!\n\n> 💡 All plans include **DDoS protection**, **24/7 uptime**, and **instant setup**.',
-        color: Colors.gold,
-        footer: 'Click Buy Now to open a purchase ticket • Prices subject to change',
-        timestamp: false,
-      });
-      const planEmbeds = plans.map(p => planEmbed(p));
-      const buttons = plans.slice(0, 5).map(p => buyButtonFor(p));
-      const rows = [];
-      for (let i = 0; i < buttons.length; i += 5) rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
-      try {
-        await ch.send({ embeds: [header, ...planEmbeds.slice(0, 9)], components: rows });
-        return interaction.reply({ embeds: [embed({ description: `✅ Sales panel posted in <#${ch.id}>!`, color: Colors.success, timestamp: false })], flags: 64 });
-      } catch {
-        return interaction.reply({ embeds: [errorEmbed('Failed to post sales panel. Check my permissions.')], flags: 64 });
-      }
-    }
   },
 };
