@@ -1,55 +1,152 @@
-import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
+import {
+  SlashCommandBuilder,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle,
+  StringSelectMenuBuilder, EmbedBuilder,
+} from 'discord.js';
 import { Ticket } from '../../storage/Ticket.js';
 import { TicketPanel } from '../../storage/TicketPanel.js';
-import { embed, Colors, errorEmbed, successEmbed } from '../../utils/embeds.js';
-import { isStaff, isAdmin, canCloseTicket, canManageTicket } from '../../utils/permissions.js';
-import { generateTranscript } from '../../utils/transcript.js';
-import { Cooldown } from '../../storage/Cooldown.js';
-import { logger } from '../../utils/logger.js';
+import { embed, Colors, errorEmbed } from '../../utils/embeds.js';
+import { isStaff, isAdmin, canCloseTicket } from '../../utils/permissions.js';
+
+// ── Build the in-ticket control panel embed + components ───────────────────
+function buildTicketPanel(ticket, panel, member) {
+  const isAdminUser = isAdmin(member);
+  const isStaffUser = isStaff(member, panel);
+  const isOwner = ticket.userId === member.id;
+  const canClose = canCloseTicket(member, ticket, panel);
+  const canManage = isAdminUser || isStaffUser;
+  const isOpen = ticket.status === 'open';
+
+  const statusLine = isOpen ? '🟢 Open' : '🔴 Closed';
+  const claimLine = ticket.claimedBy ? `🎯 Claimed by **${ticket.claimedBy}**` : '⬜ Unclaimed';
+  const priorityLine = ticket.priority ? `🏷️ Priority: **${ticket.priority}**` : '';
+
+  const e = new EmbedBuilder()
+    .setTitle('🎫 Ticket Control Panel')
+    .setColor(isOpen ? Colors.primary : Colors.error)
+    .setDescription(
+      `**Ticket #${ticket.ticketNumber}** — ${ticket.ticketType ?? 'General'}\n\n` +
+      `👤 Owner: <@${ticket.userId}>\n` +
+      `📌 Status: ${statusLine}\n` +
+      claimLine +
+      (priorityLine ? `\n${priorityLine}` : '') +
+      '\n\n*Use the buttons below to manage this ticket.*'
+    )
+    .setFooter({ text: `ID: ${ticket.id}` })
+    .setTimestamp();
+
+  const components = [];
+
+  // Row 1 — primary actions (owner + staff)
+  const row1Btns = [];
+  if (canClose && isOpen) {
+    row1Btns.push(
+      new ButtonBuilder().setCustomId(`ticket:close:${ticket.id}`).setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger)
+    );
+  }
+  if (canManage && isOpen) {
+    row1Btns.push(
+      new ButtonBuilder().setCustomId(`ticket:claim:${ticket.id}`).setLabel(ticket.claimedBy ? 'Unclaim' : 'Claim').setEmoji('🎯').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`ticket:transcript:${ticket.id}`).setLabel('Transcript').setEmoji('📄').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`ticket:priority:${ticket.id}`).setLabel('Priority').setEmoji('🏷️').setStyle(ButtonStyle.Secondary)
+    );
+  } else if ((isOwner || canManage) && isOpen) {
+    row1Btns.push(
+      new ButtonBuilder().setCustomId(`ticket:transcript:${ticket.id}`).setLabel('Transcript').setEmoji('📄').setStyle(ButtonStyle.Secondary)
+    );
+  }
+  if (!isOpen && panel?.reopenEnabled && canManage) {
+    row1Btns.push(
+      new ButtonBuilder().setCustomId(`ticket:reopen:${ticket.id}`).setLabel('Reopen').setEmoji('🔓').setStyle(ButtonStyle.Success)
+    );
+  }
+  if (row1Btns.length > 0) components.push(new ActionRowBuilder().addComponents(row1Btns));
+
+  // Row 2 — management actions (staff/admin only)
+  if (canManage && isOpen) {
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`ticket:add:${ticket.id}`).setLabel('Add User').setEmoji('➕').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`ticket:remove:${ticket.id}`).setLabel('Remove User').setEmoji('➖').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`ticket:rename:${ticket.id}`).setLabel('Rename').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`ticket:delete:${ticket.id}`).setLabel('Delete').setEmoji('🗑️').setStyle(ButtonStyle.Danger)
+      )
+    );
+  }
+
+  // Row 3 — admin tools (admin only)
+  if (isAdminUser) {
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`ticket:info:${ticket.id}`).setLabel('Info').setEmoji('ℹ️').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`ticket:stats:${interaction_guildId(member)}`).setLabel('Stats').setEmoji('📊').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`ticket:search:${interaction_guildId(member)}`).setLabel('Search').setEmoji('🔍').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`ticket:blacklist:${ticket.id}`).setLabel('Blacklist User').setEmoji('🚫').setStyle(ButtonStyle.Secondary)
+      )
+    );
+  }
+
+  return { embeds: [e], components };
+}
+
+// helper to get guildId from member
+function interaction_guildId(member) {
+  return member.guild.id;
+}
+
+// ── Build the outside-ticket help panel ────────────────────────────────────
+function buildHelpPanel(panels, member) {
+  const isAdminUser = isAdmin(member);
+
+  if (panels.length === 0) {
+    const e = new EmbedBuilder()
+      .setTitle('🎫 Ticket System')
+      .setColor(Colors.warning)
+      .setDescription(
+        isAdminUser
+          ? 'No ticket panels configured yet.\nRun `/setup-ticket` to create one, or use `/panel create`.'
+          : 'No ticket panels are available right now. Please contact a staff member.'
+      );
+    return { embeds: [e], components: [] };
+  }
+
+  const fields = panels.slice(0, 10).map(p => ({
+    name: `${p.emoji ?? '🎫'} ${p.title}`,
+    value: [
+      p.description ? p.description.slice(0, 80) + (p.description.length > 80 ? '…' : '') : '*No description*',
+      p.panelChannel ? `Channel: <#${p.panelChannel}>` : '',
+    ].filter(Boolean).join('\n'),
+    inline: false,
+  }));
+
+  const e = new EmbedBuilder()
+    .setTitle('🎫 Ticket Control Panel')
+    .setColor(Colors.primary)
+    .setDescription(
+      'Use the buttons below for ticket management, or head to the ticket panel channel to open a ticket.\n\u200b'
+    )
+    .addFields(fields)
+    .setTimestamp();
+
+  const components = [];
+
+  if (isAdminUser) {
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('ticket:stats:guild').setLabel('Server Stats').setEmoji('📊').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('ticket:search:guild').setLabel('Search Tickets').setEmoji('🔍').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('ticket:blacklist:global').setLabel('Manage Blacklist').setEmoji('🚫').setStyle(ButtonStyle.Secondary)
+      )
+    );
+  }
+
+  return { embeds: [e], components };
+}
 
 export default {
   data: new SlashCommandBuilder()
     .setName('ticket')
-    .setDescription('Ticket management commands')
-    .addSubcommand(sc => sc
-      .setName('close')
-      .setDescription('Close this ticket channel')
-      .addStringOption(o => o.setName('reason').setDescription('Reason for closing').setRequired(false))
-    )
-    .addSubcommand(sc => sc.setName('claim').setDescription('Claim or unclaim this ticket'))
-    .addSubcommand(sc => sc
-      .setName('add-user')
-      .setDescription('Add a user to this ticket')
-      .addUserOption(o => o.setName('user').setDescription('User to add').setRequired(true))
-    )
-    .addSubcommand(sc => sc
-      .setName('remove-user')
-      .setDescription('Remove a user from this ticket')
-      .addUserOption(o => o.setName('user').setDescription('User to remove').setRequired(true))
-    )
-    .addSubcommand(sc => sc
-      .setName('rename')
-      .setDescription('Rename this ticket channel')
-      .addStringOption(o => o.setName('name').setDescription('New channel name').setRequired(true).setMaxLength(90))
-    )
-    .addSubcommand(sc => sc.setName('info').setDescription('View details about this ticket'))
-    .addSubcommand(sc => sc.setName('reopen').setDescription('Reopen this closed ticket'))
-    .addSubcommand(sc => sc.setName('transcript').setDescription('Generate a transcript for this ticket'))
-    .addSubcommand(sc => sc
-      .setName('search')
-      .setDescription('Search tickets across the server')
-      .addUserOption(o => o.setName('user').setDescription('Filter by user').setRequired(false))
-      .addStringOption(o => o.setName('status').setDescription('Filter by status').addChoices({ name: 'Open', value: 'open' }, { name: 'Closed', value: 'closed' }).setRequired(false))
-      .addStringOption(o => o.setName('type').setDescription('Filter by ticket type').setRequired(false))
-    )
-    .addSubcommand(sc => sc.setName('stats').setDescription('View ticket statistics for this server'))
-    .addSubcommand(sc => sc
-      .setName('blacklist')
-      .setDescription('Add or remove a user from the ticket blacklist')
-      .addStringOption(o => o.setName('action').setDescription('add or remove').addChoices({ name: 'Add to blacklist', value: 'add' }, { name: 'Remove from blacklist', value: 'remove' }).setRequired(true))
-      .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
-      .addStringOption(o => o.setName('panel_id').setDescription('Panel ID (leave blank to apply to all panels)').setRequired(false))
-    ),
+    .setDescription('Open the Ticket Control Panel — manage tickets or view available panels'),
 
   defaultLevel: 'public',
 
