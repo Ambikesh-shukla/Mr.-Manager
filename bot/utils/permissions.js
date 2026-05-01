@@ -2,6 +2,7 @@ import { PermissionFlagsBits } from 'discord.js';
 import { GuildConfig } from '../storage/GuildConfig.js';
 import { CommandLock } from '../storage/CommandLock.js';
 import { errorEmbed } from './embeds.js';
+import { logger } from './logger.js';
 
 // ─── Default access levels for every command ───────────────────────────────
 // 'public' = anyone | 'staff' = admin or staff role | 'admin' = admin only
@@ -116,7 +117,9 @@ export async function assertPermission(interaction, commandName, defaultLevel) {
     const reply = { embeds: [errorEmbed(msg)], flags: 64 };
     if (interaction.replied || interaction.deferred) await interaction.followUp(reply);
     else await interaction.reply(reply);
-  } catch {}
+  } catch (err) {
+    logger.error('Failed to send permission error reply', err);
+  }
 
   return false;
 }

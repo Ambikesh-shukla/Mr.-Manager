@@ -24,7 +24,10 @@ export async function generateTranscript(channel, ticket) {
       lastId = fetched.last().id;
       if (fetched.size < 100) break;
     }
-  } catch { return null; }
+  } catch (err) {
+    logger.error('Failed to generate transcript - message fetch failed', err);
+    return null;
+  }
 
   messages.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 

@@ -1,4 +1,4 @@
-# This file marks discord-bot as a standalone pnpm workspace root.
+# This file marks bot as a standalone pnpm workspace root.
 # It prevents pnpm from traversing up to the monorepo root when
 # deploying this folder independently (e.g. on Render).
 packages: []

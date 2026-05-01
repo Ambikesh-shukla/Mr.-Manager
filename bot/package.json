@@ -1,5 +1,5 @@
 {
-  "name": "@workspace/discord-bot",
+  "name": "@workspace/bot",
   "version": "1.0.0",
   "description": "Minecraft server provider Discord bot",
   "main": "index.js",

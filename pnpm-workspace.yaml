@@ -36,7 +36,7 @@ minimumReleaseAgeExclude:
 
 packages:
   - api-server
-  - discord-bot
+  - bot
   - mockup-sandbox
   - lib/lib/*
   - lib/integrations/*

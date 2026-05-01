@@ -5,8 +5,11 @@ import {
 } from 'discord.js';
 import { Ticket } from '../../storage/Ticket.js';
 import { TicketPanel } from '../../storage/TicketPanel.js';
+import { Cooldown } from '../../storage/Cooldown.js';
 import { embed, Colors, errorEmbed } from '../../utils/embeds.js';
 import { isStaff, isAdmin, canCloseTicket } from '../../utils/permissions.js';
+import { generateTranscript } from '../../utils/transcript.js';
+import { logger } from '../../utils/logger.js';
 
 // ── Build the in-ticket control panel embed + components ───────────────────
 function buildTicketPanel(ticket, panel, member) {
@@ -167,13 +170,13 @@ export default {
       await interaction.deferReply({ flags: 64 });
       try {
         const updated = Ticket.update(ticket.id, { status: 'closed', closeTime: Date.now(), closeReason: reason, closedBy: interaction.user.tag });
-        try { await interaction.channel.permissionOverwrites.edit(ticket.userId, { ViewChannel: false }); } catch {}
+        try { await interaction.channel.permissionOverwrites.edit(ticket.userId, { ViewChannel: false }); } catch (err) { logger.warn('Failed to update ticket permission overwrite', err); }
 
         if (panel?.cooldownHours > 0) Cooldown.set(interaction.guild.id, ticket.userId, ticket.panelId, panel.cooldownHours);
 
         let transcript = null;
         if (panel?.transcriptEnabled !== false) {
-          try { transcript = await generateTranscript(interaction.channel, updated); } catch {}
+          try { transcript = await generateTranscript(interaction.channel, updated); } catch (err) { logger.error('Failed to generate transcript', err); }
         }
 
         const closeEmbed = embed({
@@ -192,7 +195,7 @@ export default {
           try {
             const logCh = await interaction.guild.channels.fetch(panel.logChannel);
             if (logCh) await logCh.send({ embeds: [embed({ title: '🔒 Ticket Closed', color: Colors.error, fields: [{ name: 'Channel', value: interaction.channel.name, inline: true }, { name: 'User', value: `<@${ticket.userId}>`, inline: true }, { name: 'Reason', value: reason, inline: true }] })], files: transcript ? [transcript] : [] });
-          } catch {}
+          } catch (err) { logger.warn('Failed to send ticket closed log', err); }
         }
 
         if (panel?.reopenEnabled) {

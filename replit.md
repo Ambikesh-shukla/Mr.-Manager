@@ -26,7 +26,7 @@ pnpm workspace monorepo using TypeScript and JavaScript. Each package manages it
 
 See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
 
-## Discord Bot (`artifacts/discord-bot`)
+## Discord Bot (`artifacts/bot`)
 
 Full-featured Minecraft server provider Discord bot with:
 
@@ -57,8 +57,8 @@ Full-featured Minecraft server provider Discord bot with:
 - `orders.json` — customer orders
 
 ### Key Commands
-- `pnpm --filter @workspace/discord-bot run start` — start the bot
-- `pnpm --filter @workspace/discord-bot run register` — re-register slash commands
+- `pnpm --filter @workspace/bot run start` — start the bot
+- `pnpm --filter @workspace/bot run register` — re-register slash commands
 - Workflow: "Discord Bot" (console output)
 
 ### Secrets Required

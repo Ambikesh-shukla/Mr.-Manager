@@ -1,5 +1,6 @@
 import { GuildConfig } from '../storage/GuildConfig.js';
 import { embed, Colors } from '../utils/embeds.js';
+import { logger } from '../utils/logger.js';
 
 export default {
   name: 'guildMemberAdd',
@@ -23,6 +24,8 @@ export default {
           thumbnail: member.user.displayAvatarURL({ size: 128 }),
         })]
       });
-    } catch {}
+    } catch (err) {
+      logger.error(`Failed to send welcome message in ${member.guild.name}`, err);
+    }
   },
 };

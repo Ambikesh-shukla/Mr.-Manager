@@ -2,6 +2,7 @@ import { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Chan
 import { GuildConfig } from '../../storage/GuildConfig.js';
 import { Review } from '../../storage/Review.js';
 import { embed, successEmbed, errorEmbed, Colors, reviewEmbed } from '../../utils/embeds.js';
+import { logger } from '../../utils/logger.js';
 
 export default {
   data: new SlashCommandBuilder()
@@ -61,7 +62,9 @@ export default {
           })],
           components: [row],
         });
-      } catch {}
+      } catch (err) {
+        logger.warn('Failed to send review to approval channel', err);
+      }
 
       return interaction.reply({ embeds: [successEmbed('Review Submitted', 'Your review has been submitted for approval. Thank you! 🙏')], flags: 64 });
     }

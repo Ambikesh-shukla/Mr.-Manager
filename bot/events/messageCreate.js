@@ -1,5 +1,6 @@
 import { GuildConfig } from '../storage/GuildConfig.js';
 import { Afk } from '../storage/Afk.js';
+import { logger } from '../utils/logger.js';
 
 const afkMentionCooldown = new Map();
 const COOLDOWN_MS = 30_000;
@@ -27,7 +28,9 @@ export default {
       try {
         const reply = await message.reply({ content: `👋 Welcome back <@${message.author.id}> — AFK removed (was AFK for **${relTime(ownAfk.since)}**).` });
         setTimeout(() => reply.delete().catch(() => {}), 8000);
-      } catch {}
+      } catch (err) {
+        logger.error('Failed to send AFK removal message', err);
+      }
     }
 
     // ── AFK: notify if mentions an AFK user ─────────────────────────────────
@@ -44,7 +47,7 @@ export default {
         afkLines.push(`💤 <@${user.id}> is AFK: **${data.reason}** _(since ${relTime(data.since)} ago)_`);
       }
       if (afkLines.length > 0) {
-        try { await message.reply({ content: afkLines.join('\n'), allowedMentions: { parse: [] } }); } catch {}
+        try { await message.reply({ content: afkLines.join('\n'), allowedMentions: { parse: [] } }); } catch (err) { logger.error('Failed to send AFK mention notification', err); }
       }
     }
 

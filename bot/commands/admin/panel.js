@@ -3,6 +3,7 @@ import { TicketPanel } from '../../storage/TicketPanel.js';
 import { embed, Colors, errorEmbed, successEmbed } from '../../utils/embeds.js';
 import { isAdmin } from '../../utils/permissions.js';
 import { startSetup } from '../../handlers/setupHandler.js';
+import { logger } from '../../utils/logger.js';
 
 export default {
   data: new SlashCommandBuilder()
@@ -126,7 +127,9 @@ export default {
           const ch = await interaction.guild.channels.fetch(panel.panelChannel);
           const msg = await ch?.messages?.fetch(panel.messageId);
           await msg?.delete();
-        } catch {}
+        } catch (err) {
+          logger.warn('Failed to delete old panel message', err);
+        }
       }
 
       TicketPanel.delete(panelId);

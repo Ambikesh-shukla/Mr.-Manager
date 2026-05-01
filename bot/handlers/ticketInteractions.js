@@ -220,7 +220,9 @@ async function createTicketChannel(interaction, panel, ticketType, modalAnswers)
             })]
           });
         }
-      } catch {}
+      } catch (err) {
+        logger.error('Failed to send ticket creation log', err);
+      }
     }
 
     // Inactivity auto-close
@@ -247,7 +249,9 @@ function scheduleInactivityClose(channel, ticket, panel) {
       try {
         await channel.send({ embeds: [embed({ title: '⏰ Auto-Closed', description: `This ticket was auto-closed due to ${panel.inactivityClose}h of inactivity.`, color: Colors.warning })] });
         await doCloseTicket(channel, fresh, panel, null, 'Inactivity auto-close');
-      } catch {}
+      } catch (err) {
+        logger.error('Failed to auto-close ticket due to inactivity', err);
+      }
     }
   }, ms);
   inactivityTimers.set(ticket.id, timer);
@@ -283,6 +287,10 @@ export async function handleCloseTicket(interaction, ticketId) {
 export async function handleCloseModal(interaction) {
   const ticketId = interaction.customId.split(':')[1];
   const ticket = Ticket.get(ticketId);
+  if (!ticket) {
+    await interaction.deferReply({ flags: 64 });
+    return interaction.editReply({ embeds: [errorEmbed('Ticket not found.')] });
+  }
   const reason = interaction.fields.getTextInputValue('reason') || 'No reason provided';
   await interaction.deferReply({ flags: 64 });
 
@@ -352,7 +360,9 @@ async function doCloseTicket(channel, ticket, panel, closedByMember, reason) {
           files: [transcriptAttachment],
         });
       }
-    } catch {}
+    } catch (err) {
+      logger.error('Failed to send ticket transcript to log channel', err);
+    }
   }
 
   // Log channel
