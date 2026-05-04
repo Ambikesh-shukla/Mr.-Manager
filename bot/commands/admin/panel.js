@@ -10,10 +10,6 @@ export default {
     .setName('panel')
     .setDescription('Ticket panel management')
     .addSubcommand(sc => sc
-      .setName('create')
-      .setDescription('Create a new ticket panel with the interactive wizard')
-    )
-    .addSubcommand(sc => sc
       .setName('edit')
       .setDescription('Open the interactive editor for an existing panel')
       .addStringOption(o => o.setName('panel_id').setDescription('Panel ID to edit').setRequired(true))
@@ -42,11 +38,6 @@ export default {
     }
     const sub = interaction.options.getSubcommand();
 
-    // ── create ────────────────────────────────────────────────────────────────
-    if (sub === 'create') {
-      return startSetup(interaction, null);
-    }
-
     // ── edit ──────────────────────────────────────────────────────────────────
     if (sub === 'edit') {
       const panelId = interaction.options.getString('panel_id');
@@ -58,7 +49,7 @@ export default {
       const panels = TicketPanel.forGuild(interaction.guild.id);
       if (panels.length === 0) {
         return interaction.reply({
-          embeds: [embed({ title: '🎫 No Panels', description: 'No ticket panels found.\nUse `/panel create` to create one!', color: Colors.warning })],
+          embeds: [embed({ title: '🎫 No Panels', description: 'No ticket panels found.\nUse `/setup-ticket` to create one!', color: Colors.warning })],
           flags: 64,
         });
       }

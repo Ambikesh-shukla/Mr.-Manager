@@ -1,5 +1,7 @@
 import { GuildConfig } from '../storage/GuildConfig.js';
 import { Afk } from '../storage/Afk.js';
+import { SetupSession } from '../storage/SetupSession.js';
+import { handleWizardMessage } from '../handlers/setupHandler.js';
 import { logger } from '../utils/logger.js';
 
 const afkMentionCooldown = new Map();
@@ -20,6 +22,13 @@ export default {
   once: false,
   async execute(message) {
     if (message.author.bot || !message.guild) return;
+
+    // ── Wizard message collector ─────────────────────────────────────────────
+    const wizardSession = SetupSession.getWaitingInChannel(message.guild.id, message.channelId);
+    if (wizardSession && message.author.id === wizardSession.userId) {
+      await handleWizardMessage(message, wizardSession);
+      return;
+    }
 
     // ── AFK: auto-remove for the author if they were AFK ────────────────────
     const ownAfk = Afk.get(message.guild.id, message.author.id);
