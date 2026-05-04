@@ -118,6 +118,8 @@ function buildChanSelectComponents(field) {
     qs_panel:     { label: 'Select panel channel (text)',      types: [ChannelType.GuildText] },
     qs_category:  { label: 'Select ticket category',           types: [ChannelType.GuildCategory] },
     qs_log:       { label: 'Select log channel (optional)',    types: [ChannelType.GuildText] },
+    wz_category:  { label: 'Select ticket category',           types: [ChannelType.GuildCategory] },
+    wz_log:       { label: 'Select log channel',               types: [ChannelType.GuildText] },
   };
   const m = meta[field] ?? { label: 'Select a channel', types: [ChannelType.GuildText] };
   return [
@@ -347,6 +349,21 @@ function buildQsRoleSelectComponents() {
   ];
 }
 
+// ── NEW: Wizard role-select row (Step 6) ──────────────────────────────────────
+function buildWizardRoleSelectComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new RoleSelectMenuBuilder()
+        .setCustomId('setup:role:wz_support')
+        .setPlaceholder('Select support role(s)…')
+        .setMinValues(0).setMaxValues(10)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('setup:wizard:cancel').setLabel('Cancel Setup').setEmoji('❌').setStyle(ButtonStyle.Danger)
+    ),
+  ];
+}
+
 // ── Refresh main panel (now shows new dashboard) ──────────────────────────────
 async function refreshPanel(interaction, session) {
   const payload = { embeds: [buildDashboardEmbed(session)], components: buildDashboardComponents() };
@@ -354,8 +371,117 @@ async function refreshPanel(interaction, session) {
   return interaction.reply({ ...payload, flags: 64 });
 }
 
-// ── Add/Edit Type Modals ──────────────────────────────────────────────────────
-function buildAddTypeModal() {
+// ── Wizard entry embed (simple 4-button screen for /setup-ticket) ─────────────
+function buildWizardEmbed(session) {
+  let color = Colors.primary;
+  if (session.color) {
+    try { color = parseInt(session.color.replace('#', ''), 16); } catch {}
+  }
+  const typeCount = session.ticketTypes?.length ?? 0;
+  const roles = session.allowedRoles?.length > 0
+    ? `${session.allowedRoles.length} role(s) set`
+    : 'Not set';
+
+  return new EmbedBuilder()
+    .setTitle('🎫 Ticket Setup Wizard')
+    .setDescription(
+      'Start the setup to create a new ticket panel step by step.\n\n' +
+      '> ⚡ **Start Setup** — guided step-by-step wizard\n' +
+      '> 📤 **Publish Ticket** — post the panel in a channel\n' +
+      '> 👁️ **Preview** — preview how the panel will look\n' +
+      '> ❌ **Cancel** — discard and exit\n\u200b'
+    )
+    .setColor(color)
+    .addFields(
+      { name: '📝 Title', value: `\`${session.title || 'Support Tickets'}\``, inline: true },
+      { name: '🎨 Color', value: `\`${session.color || '#5865F2'}\``, inline: true },
+      { name: '🎫 Ticket Types', value: `\`${typeCount}\``, inline: true },
+      { name: '👥 Support Roles', value: `\`${roles}\``, inline: true },
+      { name: '📋 Log Channel', value: session.logChannel ? `<#${session.logChannel}>` : '`Not set`', inline: true },
+      { name: '📁 Category', value: session.supportCategory ? `<#${session.supportCategory}>` : '`Not set`', inline: true },
+    )
+    .setFooter({ text: 'Admin-only • Run /setup-ticket any time to return here' })
+    .setTimestamp();
+}
+
+function buildWizardComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('setup:wizard:start').setLabel('Start Setup').setEmoji('⚡').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('setup:wizard:publish').setLabel('Publish Ticket').setEmoji('📤').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('setup:wizard:preview').setLabel('Preview').setEmoji('👁️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('setup:wizard:cancel').setLabel('Cancel').setEmoji('❌').setStyle(ButtonStyle.Danger),
+    ),
+  ];
+}
+
+// ── Cancel row shown during message-collector wait ────────────────────────────
+const CANCEL_ROW = () => new ActionRowBuilder().addComponents(
+  new ButtonBuilder().setCustomId('setup:wizard:cancel').setLabel('Cancel Setup').setEmoji('❌').setStyle(ButtonStyle.Danger)
+);
+
+// ── Parse cooldown string (e.g. "1h", "30m", "0") → hours (number) ───────────
+function parseCooldown(str) {
+  const s = str.trim().toLowerCase();
+  if (s === '0' || s === 'none' || s === 'off' || s === 'no') return 0;
+  const match = s.match(/^(\d+(?:\.\d+)?)\s*(h|hr|hrs|hours?|m|min|mins|minutes?)$/);
+  if (!match) return null;
+  const num = parseFloat(match[1]);
+  const unit = match[2];
+  if (unit.startsWith('m')) return Math.round((num / 60) * 100) / 100;
+  return num;
+}
+
+// ── Wizard step embeds / components ──────────────────────────────────────────
+function wizardStep3Embed() {
+  return new EmbedBuilder()
+    .setTitle('🔘 Step 3/8 — Panel Style')
+    .setDescription(
+      '**How should users choose their ticket type?**\n\n' +
+      '> 🔘 **Button Mode** — Each type appears as a clickable button\n' +
+      '> 📋 **Dropdown Mode** — All types shown in a dropdown menu\n\u200b'
+    )
+    .setColor(Colors.primary)
+    .setTimestamp();
+}
+
+function wizardStep3Components() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('setup:wizard:style:button').setLabel('Button Mode').setEmoji('🔘').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('setup:wizard:style:dropdown').setLabel('Dropdown Mode').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('setup:wizard:cancel').setLabel('Cancel').setEmoji('❌').setStyle(ButtonStyle.Danger),
+    ),
+  ];
+}
+
+function wizardStep4Embed(session) {
+  const types = session.ticketTypes ?? [];
+  const typeList = types.length > 0
+    ? types.map(t => `${t.emoji ?? '🎫'} **${t.label}** *(${t.mode ?? 'button'})*`).join('\n')
+    : '*No types yet. Click **Add Default Types** to start.*';
+  return new EmbedBuilder()
+    .setTitle('🎫 Step 4/8 — Ticket Types')
+    .setDescription(
+      '**What types of tickets can users open?**\n\n' +
+      'Add the default Support/Purchase/Bug types, or add your own.\n' +
+      'When done, click **Next →** to continue.\n\u200b'
+    )
+    .setColor(Colors.primary)
+    .addFields({ name: `Current Types (${types.length})`, value: typeList, inline: false })
+    .setTimestamp();
+}
+
+function wizardStep4Components(hasTypes) {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('setup:wizard:types:defaults').setLabel('Add Default Types').setEmoji('📦').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('setup:wizard:types:add').setLabel('Add Custom Type').setEmoji('➕').setStyle(ButtonStyle.Primary),
+      ...(hasTypes ? [new ButtonBuilder().setCustomId('setup:wizard:types:done').setLabel('Next →').setEmoji('▶️').setStyle(ButtonStyle.Success)] : []),
+      new ButtonBuilder().setCustomId('setup:wizard:cancel').setLabel('Cancel').setEmoji('❌').setStyle(ButtonStyle.Danger),
+    ),
+  ];
+}
   const modal = new ModalBuilder().setCustomId('setup:modal:addtype').setTitle('Add Ticket Type');
   modal.addComponents(
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('label').setLabel('Type Name').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Purchase, Support, Bug Report…').setMaxLength(30)),
@@ -560,26 +686,33 @@ export async function startSetup(interaction, existingPanelId = null) {
 
   let session;
   if (existingPanelId) {
+    // Editing an existing panel → show the full dashboard
     const panel = TicketPanel.get(existingPanelId);
     if (!panel || panel.guildId !== interaction.guild.id) {
       return interaction.reply({ embeds: [errorEmbed('Panel not found.')], flags: 64 });
     }
     session = SetupSession.fromPanel(interaction.guild.id, interaction.user.id, panel);
+    return interaction.reply({
+      embeds: [buildDashboardEmbed(session)],
+      components: buildDashboardComponents(),
+      flags: 64,
+    });
   } else {
-    session = SetupSession.create(interaction.guild.id, interaction.user.id);
+    // New panel → show the beginner-friendly wizard entry screen
+    session = SetupSession.get(interaction.guild.id, interaction.user.id)
+      ?? SetupSession.create(interaction.guild.id, interaction.user.id);
+    return interaction.reply({
+      embeds: [buildWizardEmbed(session)],
+      components: buildWizardComponents(),
+      flags: 64,
+    });
   }
-
-  await interaction.reply({
-    embeds: [buildDashboardEmbed(session)],
-    components: buildDashboardComponents(),
-    flags: 64,
-  });
 }
 
 // ── String select menu ────────────────────────────────────────────────────────
 export async function handleSetupMenu(interaction) {
   const session = SetupSession.get(interaction.guild.id, interaction.user.id);
-  if (!session) return interaction.reply({ embeds: [errorEmbed('Setup session expired. Run `/panel create` again.')], flags: 64 });
+  if (!session) return interaction.reply({ embeds: [errorEmbed('Setup session expired. Run `/setup-ticket` again.')], flags: 64 });
 
   const value = interaction.values[0];
 
@@ -631,7 +764,7 @@ export async function handleSetupMenu(interaction) {
 // ── Button handler ────────────────────────────────────────────────────────────
 export async function handleSetupButton(interaction, action) {
   const session = SetupSession.get(interaction.guild.id, interaction.user.id);
-  if (!session) return interaction.reply({ embeds: [errorEmbed('Setup session expired. Run `/panel create` again.')], flags: 64 });
+  if (!session) return interaction.reply({ embeds: [errorEmbed('Setup session expired. Run `/setup-ticket` again.')], flags: 64 });
 
   if (action === 'category' || action === 'logchan' || action === 'transcript') {
     const labels = { category: 'Support Category', logchan: 'Log Channel', transcript: 'Transcript Channel' };
@@ -707,7 +840,7 @@ export async function handleSetupButton(interaction, action) {
 // ── Modal submissions ─────────────────────────────────────────────────────────
 export async function handleSetupModal(interaction, field) {
   let session = SetupSession.get(interaction.guild.id, interaction.user.id);
-  if (!session) return interaction.reply({ embeds: [errorEmbed('Setup session expired. Run `/panel create` again.')], flags: 64 });
+  if (!session) return interaction.reply({ embeds: [errorEmbed('Setup session expired. Run `/setup-ticket` again.')], flags: 64 });
 
   if (field === 'addtype') {
     const typeData = parseTypeFromModal(interaction);
@@ -716,6 +849,10 @@ export async function handleSetupModal(interaction, field) {
       ticketTypes: [...(session.ticketTypes ?? []), { id: randomUUID(), ...typeData }],
     });
     session = SetupSession.get(interaction.guild.id, interaction.user.id);
+    // If we are in the wizard flow (step 4), show wizard step 4 embed
+    if (session._wizardStep === 'types') {
+      return interaction.reply({ embeds: [wizardStep4Embed(session)], components: wizardStep4Components(true), flags: 64 });
+    }
     return interaction.reply({ embeds: [buildTypesEmbed(session)], components: buildTypesComponents(session), flags: 64 });
   }
 
@@ -772,6 +909,51 @@ export async function handleSetupChanSelect(interaction, field) {
   // ── Standard post (publish) ──────────────────────────────────────────────
   if (field === 'post') return finalizePanel(interaction, session, channelId);
 
+  // ── Wizard: Step 5 — category ─────────────────────────────────────────────
+  if (field === 'wz_category') {
+    SetupSession.update(interaction.guild.id, interaction.user.id, { supportCategory: channelId, _wizardStep: 'role' });
+    return interaction.update({
+      embeds: [embed({
+        title: '👥 Step 6/8 — Support Role',
+        description: 'Select the **role that can view and manage tickets**.\n*(Staff who should be able to see and respond to ticket channels.)*',
+        color: Colors.primary, timestamp: false,
+      })],
+      components: buildWizardRoleSelectComponents(),
+    });
+  }
+
+  // ── Wizard: Step 7 — log channel ──────────────────────────────────────────
+  if (field === 'wz_log') {
+    SetupSession.update(interaction.guild.id, interaction.user.id, {
+      logChannel: channelId,
+      _wizardStep: 'cooldown',
+      _wizardChannelId: interaction.channelId,
+      _webhook: interaction.webhook,
+      _wizardPromptMsgId: null,
+    });
+    await interaction.update({
+      embeds: [embed({
+        title: '⏰ Step 8/8 — Cooldown',
+        description:
+          '**How long must users wait after closing a ticket before opening a new one?**\n\n' +
+          '> Type `0` or `off` for no cooldown\n' +
+          '> Type `1h`, `2h`, `30m`, etc. for a specific cooldown\n\n' +
+          '⏳ *Type your answer in this channel (2 minute timeout)*',
+        color: Colors.primary, timestamp: false,
+      })],
+      components: [CANCEL_ROW()],
+    });
+    // Send visible prompt in channel
+    try {
+      const promptMsg = await interaction.channel.send({
+        content: `${interaction.member} ⏰ Type the **cooldown duration** below (e.g. \`0\`, \`1h\`, \`30m\`):`,
+        allowedMentions: { parse: [] },
+      });
+      SetupSession.update(interaction.guild.id, interaction.user.id, { _wizardPromptMsgId: promptMsg.id });
+    } catch {}
+    return;
+  }
+
   // ── Quick Setup steps ─────────────────────────────────────────────────────
   if (field === 'qs_panel') {
     SetupSession.update(interaction.guild.id, interaction.user.id, { _qsPanelChannel: channelId });
@@ -824,9 +1006,22 @@ export async function handleSetupRoleSelect(interaction) {
   if (!session) return interaction.reply({ embeds: [errorEmbed('Setup session expired.')], flags: 64 });
 
   const parts = interaction.customId.split(':');
-  const field = parts[2]; // 'support' or 'qs_support'
+  const field = parts[2]; // 'support', 'qs_support', or 'wz_support'
 
   SetupSession.update(interaction.guild.id, interaction.user.id, { allowedRoles: interaction.values });
+
+  // ── Wizard step 6 → step 7 ────────────────────────────────────────────────
+  if (field === 'wz_support') {
+    SetupSession.update(interaction.guild.id, interaction.user.id, { _wizardStep: 'log' });
+    return interaction.update({
+      embeds: [embed({
+        title: '📋 Step 7/8 — Log Channel',
+        description: 'Select the **channel where ticket activity will be logged**.\n*(Ticket opens, closes, and transcripts go here.)*',
+        color: Colors.primary, timestamp: false,
+      })],
+      components: buildChanSelectComponents('wz_log'),
+    });
+  }
 
   // ── Quick Setup step 3 → step 4 ──────────────────────────────────────────
   if (field === 'qs_support') {
@@ -887,7 +1082,7 @@ export async function handleSetupRemoveSelect(interaction) {
 export async function handleSetupDashButton(interaction, action) {
   const session = SetupSession.get(interaction.guild.id, interaction.user.id);
   if (!session) {
-    return interaction.reply({ embeds: [errorEmbed('Setup session expired. Run `/setup-ticket` or `/panel create` again.')], flags: 64 });
+    return interaction.reply({ embeds: [errorEmbed('Setup session expired. Run `/setup-ticket` again.')], flags: 64 });
   }
 
   // ── Back to main dashboard ──────────────────────────────────────────────────
@@ -1049,4 +1244,265 @@ export async function handleSetupDashButton(interaction, action) {
   }
 
   return interaction.deferUpdate();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NEW: Wizard button handler (setup:wizard:*)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export async function handleWizardButton(interaction, action) {
+  const guildId = interaction.guild.id;
+  const userId = interaction.user.id;
+  let session = SetupSession.get(guildId, userId);
+  if (!session) {
+    return interaction.reply({ embeds: [errorEmbed('Setup session expired. Run `/setup-ticket` again.')], flags: 64 });
+  }
+
+  // ── Cancel ──────────────────────────────────────────────────────────────────
+  if (action === 'cancel') {
+    // Clean up any pending prompt message
+    if (session._wizardPromptMsgId && interaction.channel) {
+      try {
+        const promptMsg = await interaction.channel.messages.fetch(session._wizardPromptMsgId).catch(() => null);
+        await promptMsg?.delete().catch(() => {});
+      } catch {}
+    }
+    SetupSession.delete(guildId, userId);
+    return interaction.update({
+      embeds: [embed({ title: '❌ Setup Cancelled', description: 'Panel setup cancelled. No changes were saved.', color: Colors.error, timestamp: false })],
+      components: [],
+    });
+  }
+
+  // ── Preview ──────────────────────────────────────────────────────────────────
+  if (action === 'preview') {
+    return interaction.reply({
+      embeds: [
+        embed({ title: '👁️ Panel Preview', description: 'This is exactly how your panel will look when posted:', color: Colors.info, timestamp: false }),
+        buildPreviewEmbed(session),
+      ],
+      components: buildPreviewComponents(session),
+      flags: 64,
+    });
+  }
+
+  // ── Publish ──────────────────────────────────────────────────────────────────
+  if (action === 'publish') {
+    // Add default ticket types if none configured
+    if (!session.ticketTypes || session.ticketTypes.length === 0) {
+      SetupSession.update(guildId, userId, { ticketTypes: DEFAULT_TICKET_TYPES() });
+    }
+    return interaction.update({
+      embeds: [embed({ title: '📤 Publish Ticket Panel', description: 'Select the channel where the ticket panel will be posted.\nUsers will click buttons in this channel to open tickets.', color: Colors.success, timestamp: false })],
+      components: buildChanSelectComponents('post'),
+    });
+  }
+
+  // ── Start Setup Wizard ───────────────────────────────────────────────────────
+  if (action === 'start') {
+    // Store webhook for updating wizard message during message-collector steps
+    SetupSession.update(guildId, userId, {
+      _wizardStep: 'title',
+      _wizardChannelId: interaction.channelId,
+      _webhook: interaction.webhook,
+      _wizardPromptMsgId: null,
+    });
+
+    await interaction.update({
+      embeds: [new EmbedBuilder()
+        .setTitle('📝 Step 1/8 — Panel Title')
+        .setDescription(
+          '**What should the ticket panel be called?**\n\n' +
+          '> Examples: `Support Tickets`, `Help Desk`, `Customer Support`\n\n' +
+          '⏳ *Type your answer in this channel (2 minute timeout)*'
+        )
+        .setColor(Colors.primary)
+        .setTimestamp()],
+      components: [CANCEL_ROW()],
+    });
+
+    // Send visible prompt in channel so admin knows where to type
+    try {
+      const promptMsg = await interaction.channel.send({
+        content: `${interaction.member} 📝 Please type the **ticket panel title** below:`,
+        allowedMentions: { parse: [] },
+      });
+      SetupSession.update(guildId, userId, { _wizardPromptMsgId: promptMsg.id });
+    } catch {}
+    return;
+  }
+
+  // ── Style choice (step 3) ────────────────────────────────────────────────────
+  if (action === 'style:button' || action === 'style:dropdown') {
+    const style = action === 'style:dropdown' ? 'dropdown' : 'button';
+    SetupSession.update(guildId, userId, { panelType: style, _wizardStep: 'types' });
+    session = SetupSession.get(guildId, userId);
+    return interaction.update({
+      embeds: [wizardStep4Embed(session)],
+      components: wizardStep4Components((session.ticketTypes?.length ?? 0) > 0),
+    });
+  }
+
+  // ── Types: add defaults ──────────────────────────────────────────────────────
+  if (action === 'types:defaults') {
+    const existing = session.ticketTypes ?? [];
+    if (existing.length === 0) {
+      SetupSession.update(guildId, userId, { ticketTypes: DEFAULT_TICKET_TYPES() });
+    }
+    session = SetupSession.get(guildId, userId);
+    return interaction.update({
+      embeds: [wizardStep4Embed(session)],
+      components: wizardStep4Components(true),
+    });
+  }
+
+  // ── Types: add custom ────────────────────────────────────────────────────────
+  if (action === 'types:add') {
+    return interaction.showModal(buildAddTypeModal());
+  }
+
+  // ── Types: done → step 5 category ───────────────────────────────────────────
+  if (action === 'types:done') {
+    SetupSession.update(guildId, userId, { _wizardStep: 'category' });
+    return interaction.update({
+      embeds: [embed({
+        title: '📁 Step 5/8 — Ticket Category',
+        description:
+          'Select the **category where ticket channels will be created**.\n\n' +
+          '*Tip: Create a "Tickets" category in Discord first if you don\'t have one.*',
+        color: Colors.primary, timestamp: false,
+      })],
+      components: buildChanSelectComponents('wz_category'),
+    });
+  }
+
+  return interaction.deferUpdate();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NEW: Wizard message handler (called from messageCreate)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export async function handleWizardMessage(message, session) {
+  const guildId = session.guildId;
+  const userId = session.userId;
+
+  // Delete user's message to keep channel clean
+  await message.delete().catch(() => {});
+
+  // Delete the bot's prompt message
+  if (session._wizardPromptMsgId) {
+    try {
+      const promptMsg = await message.channel.messages.fetch(session._wizardPromptMsgId).catch(() => null);
+      await promptMsg?.delete().catch(() => {});
+    } catch {}
+  }
+
+  const step = session._wizardStep;
+  const value = message.content.trim();
+  const webhook = session._webhook;
+
+  // Helper to update the ephemeral wizard message via stored webhook
+  async function updateWizard(embedObj, compsArray) {
+    if (!webhook) return;
+    try {
+      await webhook.editMessage('@original', { embeds: [embedObj], components: compsArray });
+    } catch (err) {
+      logger.warn('Failed to update wizard message via webhook', err);
+    }
+  }
+
+  if (step === 'title') {
+    const title = (value.slice(0, 100) || 'Support Tickets');
+    SetupSession.update(guildId, userId, {
+      title,
+      _wizardStep: 'description',
+      _wizardPromptMsgId: null,
+    });
+
+    await updateWizard(
+      new EmbedBuilder()
+        .setTitle('📄 Step 2/8 — Panel Description')
+        .setDescription(
+          '**What description should appear on the ticket panel?**\n\n' +
+          '> Example: `Click below to open a support ticket. Our team will assist you shortly.`\n\n' +
+          '⏳ *Type your answer in this channel (2 minute timeout)*'
+        )
+        .setColor(Colors.primary)
+        .setTimestamp(),
+      [CANCEL_ROW()],
+    );
+
+    try {
+      const promptMsg = await message.channel.send({
+        content: `${message.member} 📄 Please type the **ticket panel description** below:`,
+        allowedMentions: { parse: [] },
+      });
+      SetupSession.update(guildId, userId, { _wizardPromptMsgId: promptMsg.id });
+    } catch {}
+    return;
+  }
+
+  if (step === 'description') {
+    const description = value.slice(0, 1000) || 'Click below to open a support ticket.';
+    SetupSession.update(guildId, userId, {
+      description,
+      _wizardStep: 'style',
+      _wizardPromptMsgId: null,
+    });
+
+    await updateWizard(wizardStep3Embed(), wizardStep3Components());
+    return;
+  }
+
+  if (step === 'cooldown') {
+    const parsed = parseCooldown(value);
+    if (parsed === null) {
+      // Invalid format — re-send prompt
+      try {
+        const promptMsg = await message.channel.send({
+          content: `${message.member} ⚠️ Invalid cooldown format. Type \`0\`, \`1h\`, \`30m\`, etc.:`,
+          allowedMentions: { parse: [] },
+        });
+        SetupSession.update(guildId, userId, { _wizardPromptMsgId: promptMsg.id });
+      } catch {}
+      return;
+    }
+
+    SetupSession.update(guildId, userId, {
+      cooldownHours: parsed,
+      _wizardStep: 'preview',
+      _wizardPromptMsgId: null,
+    });
+
+    const updated = SetupSession.get(guildId, userId);
+
+    // Add default ticket types if none configured yet
+    if (!updated.ticketTypes || updated.ticketTypes.length === 0) {
+      SetupSession.update(guildId, userId, { ticketTypes: DEFAULT_TICKET_TYPES() });
+    }
+
+    const finalSession = SetupSession.get(guildId, userId);
+    await updateWizard(
+      new EmbedBuilder()
+        .setTitle('✅ Step 9/8 — Review & Publish')
+        .setDescription(
+          '**All settings are configured! Review the preview below.**\n\n' +
+          '> Click **Publish Ticket** to post your ticket panel.\n' +
+          '> Click **Preview** to see what the panel will look like.\n\u200b'
+        )
+        .setColor(Colors.success)
+        .addFields(
+          { name: '📝 Title', value: `\`${finalSession.title}\``, inline: true },
+          { name: '🔘 Layout', value: `\`${finalSession.panelType}\``, inline: true },
+          { name: '🎫 Types', value: `\`${finalSession.ticketTypes?.length ?? 0}\``, inline: true },
+          { name: '📁 Category', value: finalSession.supportCategory ? `<#${finalSession.supportCategory}>` : '`Not set`', inline: true },
+          { name: '👥 Roles', value: finalSession.allowedRoles?.length > 0 ? `\`${finalSession.allowedRoles.length} role(s)\`` : '`Not set`', inline: true },
+          { name: '📋 Log', value: finalSession.logChannel ? `<#${finalSession.logChannel}>` : '`Not set`', inline: true },
+          { name: '⏰ Cooldown', value: finalSession.cooldownHours > 0 ? `\`${finalSession.cooldownHours}h\`` : '`Off`', inline: true },
+        )
+        .setTimestamp(),
+      buildWizardComponents(),
+    );
+  }
 }

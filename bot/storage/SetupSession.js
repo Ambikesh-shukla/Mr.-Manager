@@ -28,6 +28,11 @@ export const SetupSession = {
       openMessage: 'Thanks for opening a ticket! Support will be with you shortly.',
       ticketTypes: [],
       _editingPanelId: null,
+      // wizard state
+      _wizardStep: null,
+      _wizardChannelId: null,
+      _wizardPromptMsgId: null,
+      _webhook: null,
     };
     sessions.set(k, session);
     return session;
@@ -58,6 +63,11 @@ export const SetupSession = {
       openMessage: panel.openMessage ?? 'Thanks for opening a ticket!',
       ticketTypes: JSON.parse(JSON.stringify(panel.ticketTypes ?? [])),
       _editingPanelId: panel.id,
+      // wizard state
+      _wizardStep: null,
+      _wizardChannelId: null,
+      _wizardPromptMsgId: null,
+      _webhook: null,
     };
     sessions.set(k, session);
     return session;
@@ -75,4 +85,19 @@ export const SetupSession = {
   delete: (guildId, userId) => sessions.delete(`${guildId}:${userId}`),
 
   has: (guildId, userId) => sessions.has(`${guildId}:${userId}`),
+
+  // Find a session that is currently awaiting a message-collector input in the given channel
+  getWaitingInChannel: (guildId, channelId) => {
+    for (const [, session] of sessions) {
+      if (
+        session.guildId === guildId &&
+        session._wizardChannelId === channelId &&
+        session._wizardStep !== null &&
+        ['title', 'description', 'cooldown'].includes(session._wizardStep)
+      ) {
+        return session;
+      }
+    }
+    return null;
+  },
 };
