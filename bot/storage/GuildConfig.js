@@ -3,9 +3,6 @@ import { get, set } from './db.js';
 const COLLECTION = 'guilds';
 
 const defaults = () => ({
-  welcomeEnabled: false,
-  welcomeChannel: null,
-  welcomeMessage: 'Welcome {user} to {server}!',
   logChannel: null,
   staffRoles: [],
   autoResponses: [],
