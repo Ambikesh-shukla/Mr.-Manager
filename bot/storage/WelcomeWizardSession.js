@@ -39,9 +39,8 @@ export const WelcomeWizardSession = {
     const k = key(guildId, userId, section);
     const s = sessions.get(k);
     if (!s) return null;
-    const createdAt = s.createdAt;
-    Object.assign(s, patch);
-    s.createdAt = createdAt; // preserve original TTL start
+    const { createdAt, ...rest } = patch; // prevent callers from tampering with TTL
+    Object.assign(s, rest);
     return s;
   },
 

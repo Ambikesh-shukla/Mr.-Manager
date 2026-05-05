@@ -230,7 +230,7 @@ async function showWizardStep6(interaction, session) {
     components: [
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`welcome:wiz:btn:${section}:mention_yes`).setLabel('Yes — Mention').setEmoji('🔔').setStyle(yes ? ButtonStyle.Success : ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(`welcome:wiz:btn:${section}:mention_no`).setLabel('No — Silent').setEmoji('🔕').setStyle(!yes ? ButtonStyle.Primary : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`welcome:wiz:btn:${section}:mention_no`).setLabel('No — Silent').setEmoji('🔕').setStyle(!yes ? ButtonStyle.Success : ButtonStyle.Secondary),
       ),
       navRow(section, 'theme'),
     ],
@@ -403,27 +403,25 @@ export async function handleWelcomeInteraction(interaction, parts) {
     // ── Channel select: welcome:wiz:chan:{section} ───────────────────────────
     if (subtype === 'chan') {
       const channelId = interaction.values[0];
-      let session = WelcomeWizardSession.get(interaction.guildId, interaction.user.id, section);
+      const session = WelcomeWizardSession.get(interaction.guildId, interaction.user.id, section);
       if (!session) {
         return interaction.reply({ embeds: [errorEmbed('Setup session expired. Run `/welcome` again.')], flags: 64 });
       }
-      WelcomeWizardSession.update(interaction.guildId, interaction.user.id, section, { channelId });
-      session = WelcomeWizardSession.get(interaction.guildId, interaction.user.id, section);
+      const updated = WelcomeWizardSession.update(interaction.guildId, interaction.user.id, section, { channelId });
       await interaction.deferUpdate();
-      return showWizardStep2(interaction, session);
+      return showWizardStep2(interaction, updated);
     }
 
     // ── Theme select: welcome:wiz:theme:{section} ───────────────────────────
     if (subtype === 'theme') {
       const chosen = interaction.values[0];
-      let session = WelcomeWizardSession.get(interaction.guildId, interaction.user.id, section);
+      const session = WelcomeWizardSession.get(interaction.guildId, interaction.user.id, section);
       if (!session) {
         return interaction.reply({ embeds: [errorEmbed('Setup session expired. Run `/welcome` again.')], flags: 64 });
       }
-      WelcomeWizardSession.update(interaction.guildId, interaction.user.id, section, { theme: chosen });
-      session = WelcomeWizardSession.get(interaction.guildId, interaction.user.id, section);
+      const updated = WelcomeWizardSession.update(interaction.guildId, interaction.user.id, section, { theme: chosen });
       await interaction.deferUpdate();
-      return showWizardStep6(interaction, session);
+      return showWizardStep6(interaction, updated);
     }
 
     // ── Wizard buttons: welcome:wiz:btn:{section}:{action} ─────────────────
