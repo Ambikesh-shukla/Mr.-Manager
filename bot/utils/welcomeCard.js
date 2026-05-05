@@ -23,6 +23,9 @@ export function resolvePlaceholders(template, member) {
 // ── Image card generation (uses popcat.xyz API — no npm package needed) ───────
 const cardCache = new Map(); // url-cache to avoid refetching same card
 const CARD_CACHE_TTL = 30_000; // 30 s
+const MIN_IMAGE_BYTES = 1024;  // API error payloads are typically < 100 bytes
+const PNG_MAGIC  = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+const JPEG_MAGIC = Buffer.from([0xff, 0xd8]);
 
 export async function generateWelcomeCard({ username, avatarUrl, backgroundUrl, logoUrl, text, theme = 'dark' }) {
   const themeConfig = THEMES[theme] ?? THEMES.dark;
@@ -48,6 +51,17 @@ export async function generateWelcomeCard({ username, avatarUrl, backgroundUrl, 
     const res = await fetch(apiUrl, { signal: AbortSignal.timeout(8_000) });
     if (res.ok) {
       const buffer = Buffer.from(await res.arrayBuffer());
+
+      // Validate the buffer is a real image:
+      // - must be at least MIN_IMAGE_BYTES (a ~40-byte response is an API error payload, not an image)
+      // - must start with PNG (89 50 4E 47) or JPEG (FF D8) magic bytes
+      const isPng  = buffer.subarray(0, 4).equals(PNG_MAGIC);
+      const isJpeg = buffer.subarray(0, 2).equals(JPEG_MAGIC);
+      if (buffer.length < MIN_IMAGE_BYTES || (!isPng && !isJpeg)) {
+        logger.warn(`Welcome card API returned invalid image data (${buffer.length} bytes)`);
+        return null;
+      }
+
       const result = { type: 'image', buffer };
       cardCache.set(apiUrl, { ts: Date.now(), result });
       return result;
