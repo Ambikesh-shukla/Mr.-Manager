@@ -482,6 +482,8 @@ function wizardStep4Components(hasTypes) {
     ),
   ];
 }
+
+function buildAddTypeModal() {
   const modal = new ModalBuilder().setCustomId('setup:modal:addtype').setTitle('Add Ticket Type');
   modal.addComponents(
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('label').setLabel('Type Name').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Purchase, Support, Bug Report…').setMaxLength(30)),
