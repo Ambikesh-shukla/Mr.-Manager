@@ -17,8 +17,9 @@ const MENU_OPTIONS = [
   { label: 'Set Description', value: 'description', description: 'The embed description text', emoji: { name: '📄' } },
   { label: 'Set Color', value: 'color', description: 'Embed accent color in hex (#5865F2)', emoji: { name: '🎨' } },
   { label: 'Set Footer', value: 'footer', description: 'Small text shown at the bottom', emoji: { name: '📋' } },
-  { label: 'Set Thumbnail URL', value: 'thumbnail', description: 'Small image in the top-right corner', emoji: { name: '🖼️' } },
-  { label: 'Set Banner URL', value: 'banner', description: 'Large image below the description', emoji: { name: '🏞️' } },
+  { label: 'Set Logo URL', value: 'thumbnail', description: 'Small logo image in the top-right corner', emoji: { name: '🖼️' } },
+  { label: 'Set Banner URL', value: 'banner', description: 'Large banner image (top or bottom)', emoji: { name: '🏞️' } },
+  { label: 'Set Banner Position', value: 'bannerposition', description: 'Where to show the banner: top, bottom, or none', emoji: { name: '📐' } },
   { label: 'Set Ticket Name Format', value: 'nameformat', description: 'ticket-{username} / ticket-{number}', emoji: { name: '🏷️' } },
   { label: 'Set Cooldown (hours)', value: 'cooldown', description: 'Hours before user can open another ticket', emoji: { name: '⏰' } },
   { label: 'Set Max Tickets Per User', value: 'maxperuser', description: 'Max open tickets per user (0 = unlimited)', emoji: { name: '🔢' } },
@@ -256,7 +257,9 @@ function buildCustomizeEmbed(session) {
       { name: '🎨 Color', value: `\`${session.color || '#5865F2'}\``, inline: true },
       { name: '📋 Footer', value: session.footer ? `\`${session.footer.slice(0, 60)}\`` : '`Not set`', inline: true },
       { name: '📄 Description', value: session.description ? `\`${session.description.slice(0, 80)}${session.description.length > 80 ? '…' : ''}\`` : '`Not set`', inline: false },
-      { name: '🖼️ Image/Logo URL', value: (session.thumbnail || session.banner) ? '`Set`' : '`Not set`', inline: true },
+      { name: '🖼️ Logo URL', value: session.thumbnail ? '`Set ✅`' : '`Not set`', inline: true },
+      { name: '🏞️ Banner URL', value: session.banner ? '`Set ✅`' : '`Not set`', inline: true },
+      { name: '📐 Banner Position', value: `\`${session.bannerPosition || 'bottom'}\``, inline: true },
     )
     .setTimestamp();
 }
@@ -267,8 +270,12 @@ function buildCustomizeComponents() {
       new ButtonBuilder().setCustomId('setup:dash:cust_title').setLabel('Title').setEmoji('📝').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('setup:dash:cust_desc').setLabel('Description').setEmoji('📄').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('setup:dash:cust_color').setLabel('Color').setEmoji('🎨').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('setup:dash:cust_image').setLabel('Image/Logo').setEmoji('🖼️').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('setup:dash:cust_footer').setLabel('Footer').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('setup:dash:cust_logo').setLabel('Logo URL').setEmoji('🖼️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('setup:dash:cust_banner').setLabel('Banner URL').setEmoji('🏞️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('setup:dash:cust_bannerpos').setLabel('Banner Position').setEmoji('📐').setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('setup:dash:back').setLabel('Back to Dashboard').setEmoji('⬅️').setStyle(ButtonStyle.Primary),
@@ -566,22 +573,36 @@ export function buildPostedPanelComponents(panel) {
   ];
 }
 
-// ── Build preview embed (same as the live panel) ──────────────────────────────
-function buildPreviewEmbed(session) {
+// ── Build the actual live panel embed(s) (supports top/bottom/none banner) ─────
+function buildPreviewEmbeds(session) {
   let color = Colors.primary;
   if (session.color) {
     try { color = parseInt(session.color.replace('#', ''), 16); } catch {}
   }
-  const e = new EmbedBuilder()
+  const panelEmbed = new EmbedBuilder()
     .setTitle(session.title || 'Support Tickets')
     .setDescription(session.description || 'Open a ticket below.')
     .setColor(color)
     .setTimestamp();
-  if (session.footer) e.setFooter({ text: session.footer });
-  try { if (session.thumbnail) e.setThumbnail(session.thumbnail); } catch {}
-  try { if (session.banner) e.setImage(session.banner); } catch {}
-  return e;
+  if (session.footer) panelEmbed.setFooter({ text: session.footer });
+  try { if (session.thumbnail) panelEmbed.setThumbnail(session.thumbnail); } catch {}
+
+  const bannerPos = session.bannerPosition ?? 'bottom';
+
+  if (session.banner && bannerPos === 'top') {
+    // Send a banner embed before the panel embed
+    const bannerEmbed = new EmbedBuilder().setImage(session.banner).setColor(color);
+    return [bannerEmbed, panelEmbed];
+  }
+
+  if (session.banner && bannerPos === 'bottom') {
+    try { panelEmbed.setImage(session.banner); } catch {}
+  }
+
+  // bannerPos === 'none' or no banner: no image
+  return [panelEmbed];
 }
+
 
 function buildPreviewComponents(session) {
   const types = session.ticketTypes ?? [];
@@ -626,6 +647,7 @@ async function finalizePanel(interaction, session, channelId) {
       footer: session.footer,
       thumbnail: session.thumbnail,
       banner: session.banner,
+      bannerPosition: session.bannerPosition ?? 'bottom',
       namingFormat: session.namingFormat,
       supportCategory: session.supportCategory,
       logChannel: session.logChannel,
@@ -650,18 +672,19 @@ async function finalizePanel(interaction, session, channelId) {
       if (panel?.messageId) {
         try {
           const oldMsg = await channel.messages.fetch(panel.messageId);
-          await oldMsg.edit({ embeds: [buildPreviewEmbed(session)], components: buildPostedPanelComponents(panel) });
+          const updatedEmbeds = buildPreviewEmbeds(session);
+          await oldMsg.edit({ embeds: updatedEmbeds, components: buildPostedPanelComponents(panel) });
           SetupSession.delete(guild.id, interaction.user.id);
-          return interaction.editReply({ embeds: [successEmbed('Panel Updated', `Panel updated in <#${channelId}>`), buildPreviewEmbed(session)], components: [] });
+          return interaction.editReply({ embeds: [successEmbed('Panel Updated', `Panel updated in <#${channelId}>`)], components: [] });
         } catch {}
       }
     } else {
       panel = TicketPanel.create(guild.id, panelData);
     }
 
-    const panelEmbed = buildPreviewEmbed(session);
+    const panelEmbeds = buildPreviewEmbeds(session);
     const panelComponents = buildPostedPanelComponents(panel);
-    const msg = await channel.send({ embeds: [panelEmbed], components: panelComponents });
+    const msg = await channel.send({ embeds: panelEmbeds, components: panelComponents });
     TicketPanel.update(panel.id, { messageId: msg.id });
 
     SetupSession.delete(guild.id, interaction.user.id);
@@ -731,17 +754,18 @@ export async function handleSetupMenu(interaction) {
   }
 
   const fieldConfig = {
-    title:       { label: 'Panel Title',                       placeholder: 'Support Tickets',                     current: session.title,          max: 100 },
-    description: { label: 'Panel Description',                 placeholder: 'Click below to open a ticket.',       current: session.description,    max: 4000, long: true },
-    color:       { label: 'Embed Color (hex)',                  placeholder: '#5865F2',                             current: session.color,          max: 7 },
-    footer:      { label: 'Footer Text',                        placeholder: 'Response time: within 24 hours',     current: session.footer,         max: 200 },
-    thumbnail:   { label: 'Thumbnail URL (top-right image)',    placeholder: 'https://example.com/icon.png',        current: session.thumbnail,      max: 500 },
-    banner:      { label: 'Banner URL (large image)',           placeholder: 'https://example.com/banner.png',     current: session.banner,         max: 500 },
-    nameformat:  { label: 'Ticket Name Format',                 placeholder: 'ticket-{username} or ticket-{number}', current: session.namingFormat, max: 50 },
-    cooldown:    { label: 'Cooldown Hours (0 = off)',           placeholder: '0',                                   current: String(session.cooldownHours), max: 4 },
-    maxperuser:  { label: 'Max Tickets Per User (0 = unlimited)', placeholder: '1',                                current: String(session.maxPerUser),    max: 4 },
-    maxglobal:   { label: 'Max Global Tickets (0 = unlimited)', placeholder: '0',                                   current: String(session.maxGlobal),     max: 4 },
-    openmessage: { label: 'Ticket Open Message',                placeholder: 'Support will be with you shortly!',  current: session.openMessage,    max: 500, long: true },
+    title:         { label: 'Panel Title',                         placeholder: 'Support Tickets',                     current: session.title,               max: 100 },
+    description:   { label: 'Panel Description',                   placeholder: 'Click below to open a ticket.',       current: session.description,         max: 4000, long: true },
+    color:         { label: 'Embed Color (hex)',                    placeholder: '#5865F2',                             current: session.color,               max: 7 },
+    footer:        { label: 'Footer Text',                          placeholder: 'Response time: within 24 hours',     current: session.footer,              max: 200 },
+    thumbnail:     { label: 'Logo URL (top-right image)',           placeholder: 'https://example.com/logo.png',        current: session.thumbnail,           max: 500 },
+    banner:        { label: 'Banner URL (large image)',             placeholder: 'https://example.com/banner.png',     current: session.banner,              max: 500 },
+    bannerposition:{ label: 'Banner Position (top/bottom/none)',    placeholder: 'bottom',                              current: session.bannerPosition,      max: 6 },
+    nameformat:    { label: 'Ticket Name Format',                   placeholder: 'ticket-{username} or ticket-{number}', current: session.namingFormat,      max: 50 },
+    cooldown:      { label: 'Cooldown Hours (0 = off)',             placeholder: '0',                                   current: String(session.cooldownHours), max: 4 },
+    maxperuser:    { label: 'Max Tickets Per User (0 = unlimited)', placeholder: '1',                                   current: String(session.maxPerUser),    max: 4 },
+    maxglobal:     { label: 'Max Global Tickets (0 = unlimited)',   placeholder: '0',                                   current: String(session.maxGlobal),     max: 4 },
+    openmessage:   { label: 'Ticket Open Message',                  placeholder: 'Support will be with you shortly!',  current: session.openMessage,         max: 500, long: true },
   };
 
   const cfg = fieldConfig[value];
@@ -806,10 +830,11 @@ export async function handleSetupButton(interaction, action) {
   if (action === 'back') return refreshPanel(interaction, session);
 
   if (action === 'preview') {
+    const btnPreviewEmbeds = buildPreviewEmbeds(session);
     return interaction.reply({
       embeds: [
         embed({ title: '👁️ Panel Preview', description: 'This is exactly how your panel will look when posted:', color: Colors.info, timestamp: false }),
-        buildPreviewEmbed(session),
+        ...btnPreviewEmbeds,
       ],
       components: buildPreviewComponents(session),
       flags: 64,
@@ -881,7 +906,7 @@ export async function handleSetupModal(interaction, field) {
   const value = interaction.fields.getTextInputValue('value')?.trim() ?? '';
 
   const numericMap = { maxperuser: 'maxPerUser', maxglobal: 'maxGlobal' };
-  const textMap = { title: 'title', description: 'description', color: 'color', footer: 'footer', thumbnail: 'thumbnail', banner: 'banner', nameformat: 'namingFormat', openmessage: 'openMessage' };
+  const textMap = { title: 'title', description: 'description', color: 'color', footer: 'footer', thumbnail: 'thumbnail', banner: 'banner', bannerposition: 'bannerPosition', nameformat: 'namingFormat', openmessage: 'openMessage' };
 
   if (numericMap[field] !== undefined) {
     SetupSession.update(interaction.guild.id, interaction.user.id, { [numericMap[field]]: Math.max(0, parseInt(value) || 0) });
@@ -889,12 +914,19 @@ export async function handleSetupModal(interaction, field) {
     if (field === 'color' && value && !/^#[0-9A-Fa-f]{6}$/.test(value)) {
       return interaction.reply({ embeds: [errorEmbed('Invalid hex color. Format: `#5865F2`')], flags: 64 });
     }
-    SetupSession.update(interaction.guild.id, interaction.user.id, { [textMap[field]]: value });
+    if (field === 'bannerposition') {
+      const pos = value.toLowerCase();
+      const valid = ['top', 'bottom', 'none'];
+      SetupSession.update(interaction.guild.id, interaction.user.id, { bannerPosition: valid.includes(pos) ? pos : 'bottom' });
+    } else {
+      // Preserve Unicode styled text exactly as entered — no normalization
+      SetupSession.update(interaction.guild.id, interaction.user.id, { [textMap[field]]: value });
+    }
   }
 
   session = SetupSession.get(interaction.guild.id, interaction.user.id);
   // After customise modals, return to the customize sub-panel for smooth UX
-  const customizeFields = ['title', 'description', 'color', 'footer', 'thumbnail', 'banner'];
+  const customizeFields = ['title', 'description', 'color', 'footer', 'thumbnail', 'banner', 'bannerposition'];
   if (customizeFields.includes(field)) {
     return interaction.reply({ embeds: [buildCustomizeEmbed(session)], components: buildCustomizeComponents(), flags: 64 });
   }
@@ -1123,11 +1155,12 @@ export async function handleSetupDashButton(interaction, action) {
 
   // ── Customize field modals ─────────────────────────────────────────────────
   const customizeModalMap = {
-    cust_title:  { field: 'title',       label: 'Panel Title',           placeholder: 'Support Tickets',                   current: session.title,          max: 100 },
-    cust_desc:   { field: 'description', label: 'Panel Description',     placeholder: 'Click below to open a ticket.',     current: session.description,    max: 4000, long: true },
-    cust_color:  { field: 'color',       label: 'Embed Color (hex)',      placeholder: '#5865F2',                           current: session.color,          max: 7 },
-    cust_image:  { field: 'banner',      label: 'Image/Logo URL',        placeholder: 'https://example.com/banner.png',    current: session.banner,         max: 500 },
-    cust_footer: { field: 'footer',      label: 'Footer Text',           placeholder: 'Response time: within 24 hours',   current: session.footer,         max: 200 },
+    cust_title:  { field: 'title',       label: 'Panel Title',                placeholder: 'Support Tickets',                   current: session.title,          max: 100 },
+    cust_desc:   { field: 'description', label: 'Panel Description',          placeholder: 'Click below to open a ticket.',     current: session.description,    max: 4000, long: true },
+    cust_color:  { field: 'color',       label: 'Embed Color (hex)',           placeholder: '#5865F2',                           current: session.color,          max: 7 },
+    cust_logo:   { field: 'thumbnail',   label: 'Logo URL (top-right image)', placeholder: 'https://example.com/logo.png',      current: session.thumbnail,      max: 500 },
+    cust_banner: { field: 'banner',      label: 'Banner URL (large image)',   placeholder: 'https://example.com/banner.png',    current: session.banner,         max: 500 },
+    cust_footer: { field: 'footer',      label: 'Footer Text',                placeholder: 'Response time: within 24 hours',   current: session.footer,         max: 200 },
   };
   if (customizeModalMap[action]) {
     const cfg = customizeModalMap[action];
@@ -1145,6 +1178,16 @@ export async function handleSetupDashButton(interaction, action) {
       )
     );
     return interaction.showModal(modal);
+  }
+
+  // ── Banner Position selector ─────────────────────────────────────────────────
+  if (action === 'cust_bannerpos') {
+    const current = session.bannerPosition ?? 'bottom';
+    // Cycle through positions: bottom → top → none → bottom
+    const next = current === 'bottom' ? 'top' : current === 'top' ? 'none' : 'bottom';
+    SetupSession.update(interaction.guild.id, interaction.user.id, { bannerPosition: next });
+    const updated = SetupSession.get(interaction.guild.id, interaction.user.id);
+    return interaction.update({ embeds: [buildCustomizeEmbed(updated)], components: buildCustomizeComponents() });
   }
 
   // ── Ticket Types ────────────────────────────────────────────────────────────
@@ -1227,10 +1270,11 @@ export async function handleSetupDashButton(interaction, action) {
 
   // ── Preview ─────────────────────────────────────────────────────────────────
   if (action === 'preview') {
+    const dashPreviewEmbeds = buildPreviewEmbeds(session);
     return interaction.reply({
       embeds: [
         embed({ title: '👁️ Panel Preview', description: 'This is exactly how your panel will look when posted:', color: Colors.info, timestamp: false }),
-        buildPreviewEmbed(session),
+        ...dashPreviewEmbeds,
       ],
       components: buildPreviewComponents(session),
       flags: 64,
@@ -1278,10 +1322,11 @@ export async function handleWizardButton(interaction, action) {
 
   // ── Preview ──────────────────────────────────────────────────────────────────
   if (action === 'preview') {
+    const wizardPreviewEmbeds = buildPreviewEmbeds(session);
     return interaction.reply({
       embeds: [
         embed({ title: '👁️ Panel Preview', description: 'This is exactly how your panel will look when posted:', color: Colors.info, timestamp: false }),
-        buildPreviewEmbed(session),
+        ...wizardPreviewEmbeds,
       ],
       components: buildPreviewComponents(session),
       flags: 64,
