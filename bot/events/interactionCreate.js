@@ -20,6 +20,7 @@ import {
 } from '../handlers/setupHandler.js';
 import { Review } from '../storage/Review.js';
 import { GuildConfig } from '../storage/GuildConfig.js';
+import { Ticket } from '../storage/Ticket.js';
 import { embed, Colors } from '../utils/embeds.js';
 
 export default {
@@ -104,6 +105,28 @@ export default {
           if (action === 'delete') return handleDeleteTicket(interaction, id);
           if (action === 'transcript') return handleTranscriptButton(interaction, id);
           if (action === 'priority') return handlePrioritySelect(interaction, id);
+
+          // ── Ticket Control Panel dashboard buttons (admin-only) ──────────────
+          if (action === 'stats') {
+            const s = Ticket.stats(interaction.guild.id);
+            return interaction.reply({
+              embeds: [embed({
+                title: '📊 Server Ticket Statistics',
+                color: Colors.info,
+                fields: [
+                  { name: '🟢 Open', value: String(s.open), inline: true },
+                  { name: '🔒 Closed', value: String(s.closed), inline: true },
+                  { name: '📋 Total', value: String(s.total), inline: true },
+                  { name: '📅 Today', value: String(s.today), inline: true },
+                  { name: '📆 This Week', value: String(s.week), inline: true },
+                ],
+              })],
+              flags: 64,
+            });
+          }
+          if (action === 'search' || action === 'blacklist') {
+            return interaction.reply({ embeds: [errorEmbed('This feature is not yet available.')], flags: 64 });
+          }
         }
 
         if (ns === 'plan_buy') return handlePlanBuy(interaction, action);
