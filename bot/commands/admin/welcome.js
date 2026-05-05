@@ -23,7 +23,7 @@ export default {
         const msg = { content: `❌ Error: \`${error.message}\``, flags: 64 };
         if (interaction.replied || interaction.deferred) await interaction.followUp(msg);
         else await interaction.reply(msg);
-      } catch {}
+      } catch { /* ignore secondary reply errors to avoid infinite loops */ }
     }
   },
 };
