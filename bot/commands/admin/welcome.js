@@ -15,6 +15,15 @@ export default {
     if (!isAdmin(interaction.member)) {
       return interaction.reply({ embeds: [errorEmbed('You need **Administrator** or **Manage Server** permission.')], flags: 64 });
     }
-    return showWelcomeDashboard(interaction);
+    try {
+      return await showWelcomeDashboard(interaction);
+    } catch (error) {
+      console.error(error);
+      try {
+        const msg = { content: `❌ Error: \`${error.message}\``, flags: 64 };
+        if (interaction.replied || interaction.deferred) await interaction.followUp(msg);
+        else await interaction.reply(msg);
+      } catch {}
+    }
   },
 };
