@@ -75,7 +75,6 @@ export default {
           title: `⚙️ Bot Configuration — ${interaction.guild.name}`,
           color: Colors.primary,
           fields: [
-            { name: '👋 Welcome', value: config.welcomeEnabled ? `✅ <#${config.welcomeChannel}>` : '❌ Disabled', inline: true },
             { name: '📋 Log Channel', value: config.logChannel ? `<#${config.logChannel}>` : 'Not set', inline: true },
             { name: '💡 Suggestions', value: config.suggestionChannel ? `<#${config.suggestionChannel}>` : 'Not set', inline: true },
             { name: '⭐ Vouches', value: config.vouchChannel ? `<#${config.vouchChannel}>` : 'Not set', inline: true },

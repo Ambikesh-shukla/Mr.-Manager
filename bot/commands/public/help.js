@@ -25,7 +25,6 @@ export default {
               '`/ticket list/info/edit/delete` — Manage existing ticket panels',
               '`/post announce/embed/faq` — Post announcements, embeds, FAQs',
               '`/autoresponse add/remove/list` — Keyword auto-responses',
-              '`/welcome enable/disable/test` — Configure welcome messages',
             ].join('\n'),
             inline: false,
           },

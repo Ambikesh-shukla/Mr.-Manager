@@ -17,7 +17,6 @@ export const COMMAND_DEFAULTS = {
   suggest: 'public',
   ticket: 'public',
   'setup-ticket': 'admin',
-  welcome: 'admin',
   help: 'public',
   ping: 'public',
   serverinfo: 'public',

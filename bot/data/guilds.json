@@ -1,8 +1,5 @@
 {
   "1489165519293644871": {
-    "welcomeEnabled": false,
-    "welcomeChannel": null,
-    "welcomeMessage": "Welcome {user} to {server}!",
     "logChannel": null,
     "staffRoles": [],
     "autoResponses": [
