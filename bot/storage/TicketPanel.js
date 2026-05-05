@@ -15,6 +15,7 @@ export const TicketPanel = {
       footer: data.footer ?? '',
       thumbnail: data.thumbnail ?? '',
       banner: data.banner ?? '',
+      bannerPosition: data.bannerPosition ?? 'bottom',
       emoji: data.emoji ?? '🎫',
       buttonLabel: data.buttonLabel ?? 'Open Ticket',
       dropdownLabel: data.dropdownLabel ?? 'Select ticket type',
