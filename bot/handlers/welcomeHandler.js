@@ -21,6 +21,9 @@ const TOTAL_WIZARD_STEPS = 6;
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 export async function showWelcomeDashboard(interaction) {
+  if (!interaction.guildId) {
+    return interaction.reply({ embeds: [errorEmbed('This command can only be used in a server.')], flags: 64 });
+  }
   const cfg = WelcomeConfig.get(interaction.guildId);
 
   const dashEmbed = new EmbedBuilder()

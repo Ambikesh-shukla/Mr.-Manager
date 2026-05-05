@@ -86,7 +86,7 @@ export function buildFallbackEmbed({ member, resolvedText, config, section }) {
 
   const e = new EmbedBuilder()
     .setColor(themeConfig.accent)
-    .setAuthor({ name: isWelcome ? `Welcome to ${member.guild.name}!` : `Goodbye from ${member.guild.name}!`, iconURL: member.guild.iconURL() })
+    .setAuthor({ name: isWelcome ? `Welcome to ${member.guild.name}!` : `Goodbye from ${member.guild.name}!`, iconURL: member.guild.iconURL() ?? undefined })
     .setDescription(resolvedText)
     .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
     .setFooter({ text: `Members: ${member.guild.memberCount}` })
