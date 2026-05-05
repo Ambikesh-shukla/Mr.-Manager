@@ -22,6 +22,7 @@ import { Review } from '../storage/Review.js';
 import { GuildConfig } from '../storage/GuildConfig.js';
 import { Ticket } from '../storage/Ticket.js';
 import { embed, Colors } from '../utils/embeds.js';
+import { handleWelcomeInteraction } from '../handlers/welcomeHandler.js';
 
 export default {
   name: 'interactionCreate',
@@ -91,6 +92,8 @@ export default {
           if (action === 'wizard') return handleWizardButton(interaction, parts.slice(2).join(':'));
           return interaction.deferUpdate();
         }
+
+        if (ns === 'welcome') return handleWelcomeInteraction(interaction, parts);
 
         if (ns === 'panel') return handlePanelButton(interaction, id, extra ?? null);
         if (ns === 'ticketopentype') return openTicket(interaction, action, id);
@@ -177,6 +180,7 @@ export default {
           if (action === 'removeselect') return handleSetupRemoveSelect(interaction);
           return interaction.deferUpdate();
         }
+        if (ns === 'welcome') return handleWelcomeInteraction(interaction, parts);
         if (ns === 'panelselect') return handlePanelSelect(interaction, action);
         if (ns === 'ticketpriority_set') return handlePrioritySet(interaction, action);
         if (ns === 'noop') return interaction.deferUpdate();
@@ -187,6 +191,7 @@ export default {
       if (interaction.isChannelSelectMenu()) {
         const parts = interaction.customId.split(':');
         if (parts[0] === 'setup' && parts[1] === 'chan') return handleSetupChanSelect(interaction, parts[2]);
+        if (parts[0] === 'welcome') return handleWelcomeInteraction(interaction, parts);
         return;
       }
 
@@ -203,6 +208,7 @@ export default {
         const ns = parts[0], action = parts[1];
 
         if (ns === 'setup' && action === 'modal') return handleSetupModal(interaction, parts.slice(2).join(':'));
+        if (ns === 'welcome') return handleWelcomeInteraction(interaction, parts);
         if (ns === 'ticketmodal') return handleTicketModal(interaction);
         if (ns === 'ticketclose') return handleCloseModal(interaction);
         if (ns === 'ticketadduser') return handleAddUserModal(interaction);
