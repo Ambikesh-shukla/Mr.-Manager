@@ -23,6 +23,7 @@ export const COMMAND_DEFAULTS = {
   ping: 'public',
   serverinfo: 'public',
   afk: 'public',
+  purge: 'staff',
 };
 
 // ─── Raw checkers ──────────────────────────────────────────────────────────
