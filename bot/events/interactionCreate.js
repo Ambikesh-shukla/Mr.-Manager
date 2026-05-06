@@ -24,6 +24,7 @@ import { GuildConfig } from '../storage/GuildConfig.js';
 import { Ticket } from '../storage/Ticket.js';
 import { embed, Colors, successEmbed } from '../utils/embeds.js';
 import { handleWelcomeInteraction } from '../handlers/welcomeHandler.js';
+import { handleLinkInteraction } from '../handlers/linkHandler.js';
 
 export default {
   name: 'interactionCreate',
@@ -95,6 +96,8 @@ export default {
         }
 
         if (ns === 'welcome') return handleWelcomeInteraction(interaction, parts);
+
+        if (ns === 'link') return handleLinkInteraction(interaction, parts);
 
         if (ns === 'panel') return handlePanelButton(interaction, id, extra ?? null);
         if (ns === 'ticketopentype') return openTicket(interaction, action, id);
@@ -248,6 +251,13 @@ export default {
       if (interaction.isRoleSelectMenu()) {
         const parts = interaction.customId.split(':');
         if (parts[0] === 'setup' && parts[1] === 'role') return handleSetupRoleSelect(interaction);
+        return;
+      }
+
+      // ── User Selects ───────────────────────────────────────────────────────
+      if (interaction.isUserSelectMenu()) {
+        const parts = interaction.customId.split(':');
+        if (parts[0] === 'link') return handleLinkInteraction(interaction, parts);
         return;
       }
 

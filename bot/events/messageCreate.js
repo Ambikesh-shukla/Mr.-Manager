@@ -1,11 +1,18 @@
+import { PermissionFlagsBits } from 'discord.js';
 import { GuildConfig } from '../storage/GuildConfig.js';
 import { Afk } from '../storage/Afk.js';
 import { SetupSession } from '../storage/SetupSession.js';
+import { LinkConfig } from '../storage/LinkConfig.js';
 import { handleWizardMessage } from '../handlers/setupHandler.js';
 import { logger } from '../utils/logger.js';
 
 const afkMentionCooldown = new Map();
 const COOLDOWN_MS = 30_000;
+
+// Matches http(s)://, www., discord.gg/, discord.com/invite/, and common TLDs
+const LINK_REGEX = /https?:\/\/|www\.|discord\.gg\/|discord\.com\/invite\/|\S+\.(com|net|org|gg|io|xyz|me|in)(?:\/|\s|$)/i;
+
+const BOT_OWNER_ID = process.env.BOT_OWNER_ID ?? null;
 
 function relTime(ms) {
   const s = Math.floor((Date.now() - ms) / 1000);
@@ -57,6 +64,34 @@ export default {
       }
       if (afkLines.length > 0) {
         try { await message.reply({ content: afkLines.join('\n'), allowedMentions: { parse: [] } }); } catch (err) { logger.error('Failed to send AFK mention notification', err); }
+      }
+    }
+
+    // ── Link blocking ─────────────────────────────────────────────────────────
+    const linkCfg = LinkConfig.get(message.guild.id);
+    if (linkCfg.enabled && LINK_REGEX.test(message.content)) {
+      let canBypass = false;
+      if (linkCfg.allowOwner && message.guild.ownerId === message.author.id) canBypass = true;
+      if (!canBypass && linkCfg.allowAdmins && message.member?.permissions.has(PermissionFlagsBits.Administrator)) canBypass = true;
+      if (!canBypass && linkCfg.allowBotOwner && BOT_OWNER_ID && message.author.id === BOT_OWNER_ID) canBypass = true;
+      if (!canBypass && linkCfg.allowedUsers.includes(message.author.id)) canBypass = true;
+
+      if (!canBypass) {
+        try {
+          await message.delete();
+        } catch (err) {
+          if (err.code !== 10008) logger.warn('Failed to delete link message', err);
+        }
+        try {
+          const warn = await message.channel.send({
+            content: `🔗 <@${message.author.id}>, links are not allowed in this server.`,
+            allowedMentions: { users: [message.author.id] },
+          });
+          setTimeout(() => warn.delete().catch(() => {}), 5000);
+        } catch (err) {
+          logger.warn('Failed to send link warning', err);
+        }
+        return;
       }
     }
 
