@@ -135,7 +135,51 @@ export default {
 
         if (ns === 'plan_buy') return handlePlanBuy(interaction, action);
 
-        if (ns === 'suggest') return interaction.deferUpdate();
+        if (ns === 'suggest') {
+          const { Suggestion } = await import('../storage/Suggestion.js');
+          const suggestion = Suggestion.get(id);
+          if (!suggestion) return interaction.reply({ embeds: [errorEmbed('Suggestion not found.')], flags: 64 });
+
+          const userId = interaction.user.id;
+          let { upvotes, downvotes } = suggestion;
+
+          const votedUp   = upvotes.includes(userId);
+          const votedDown = downvotes.includes(userId);
+
+          if (action === 'up') {
+            if (votedUp) {
+              // Toggle off
+              upvotes = upvotes.filter(u => u !== userId);
+            } else {
+              upvotes = [...upvotes, userId];
+              downvotes = downvotes.filter(u => u !== userId);
+            }
+          } else if (action === 'down') {
+            if (votedDown) {
+              // Toggle off
+              downvotes = downvotes.filter(u => u !== userId);
+            } else {
+              downvotes = [...downvotes, userId];
+              upvotes = upvotes.filter(u => u !== userId);
+            }
+          }
+
+          Suggestion.update(id, { upvotes, downvotes });
+
+          const updatedRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`suggest:up:${id}`)
+              .setLabel(`👍 Upvote (${upvotes.length})`)
+              .setStyle(ButtonStyle.Success),
+            new ButtonBuilder()
+              .setCustomId(`suggest:down:${id}`)
+              .setLabel(`👎 Downvote (${downvotes.length})`)
+              .setStyle(ButtonStyle.Danger),
+          );
+
+          await interaction.update({ components: [updatedRow] });
+          return;
+        }
 
         if (ns === 'noop') {
           if (action === 'previewselect' || action === 'preview') return interaction.deferUpdate();
