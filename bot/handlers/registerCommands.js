@@ -41,15 +41,26 @@ export async function registerCommands({ forceClean = true } = {}) {
   const token = process.env.DISCORD_BOT_TOKEN;
   const appId = process.env.DISCORD_APPLICATION_ID;
   const guildId = process.env.DISCORD_GUILD_ID;
+  // COMMAND_SCOPE controls deployment target; falls back to legacy GUILD_ID behaviour.
+  const scope = (process.env.COMMAND_SCOPE || (guildId ? 'guild' : 'global')).toLowerCase();
 
   if (!token || !appId) {
     console.error('[REGISTER] Missing DISCORD_BOT_TOKEN or DISCORD_APPLICATION_ID');
     return 0;
   }
+  if (scope !== 'global' && scope !== 'guild') {
+    console.error('[REGISTER] COMMAND_SCOPE must be "global" or "guild". Got:', process.env.COMMAND_SCOPE);
+    return 0;
+  }
+  if (scope === 'guild' && !guildId) {
+    console.error('[REGISTER] COMMAND_SCOPE=guild requires DISCORD_GUILD_ID to be set');
+    return 0;
+  }
 
   console.log('═══════════════ COMMAND DEPLOY ═══════════════');
-  console.log('[REGISTER] CLIENT_ID :', appId);
-  console.log('[REGISTER] GUILD_ID  :', guildId || '(none — using GLOBAL scope)');
+  console.log('[REGISTER] CLIENT_ID      :', appId);
+  console.log('[REGISTER] GUILD_ID       :', guildId || '(not set)');
+  console.log('[REGISTER] COMMAND_SCOPE  :', scope.toUpperCase());
 
   const commands = await loadLocalCommands();
   console.log(`[REGISTER] LOADED FROM FILES (${commands.length}):`);
@@ -57,33 +68,41 @@ export async function registerCommands({ forceClean = true } = {}) {
 
   const rest = new REST().setToken(token);
 
-  // ── Force-clean: wipe BOTH scopes before deploying the correct one ───────
+  // ── Force-clean: wipe the opposite scope to prevent duplicates ────────────
   if (forceClean) {
-    try {
-      const oldGlobal = await rest.get(Routes.applicationCommands(appId));
-      console.log(`[REGISTER] Discord currently has ${oldGlobal.length} GLOBAL command(s):`,
-        oldGlobal.map(c => c.name).join(', ') || '(none)');
-      if (oldGlobal.length > 0 && guildId) {
-        await rest.put(Routes.applicationCommands(appId), { body: [] });
-        console.log('[REGISTER] 🧹 Cleared ALL global commands (using guild scope instead)');
+    if (scope === 'global') {
+      // Clear guild commands so they don't shadow the newly registered global ones.
+      if (guildId) {
+        try {
+          const oldGuild = await rest.get(Routes.applicationGuildCommands(appId, guildId));
+          console.log(`[REGISTER] Discord currently has ${oldGuild.length} GUILD command(s) in ${guildId}:`,
+            oldGuild.map(c => c.name).join(', ') || '(none)');
+          if (oldGuild.length > 0) {
+            await rest.put(Routes.applicationGuildCommands(appId, guildId), { body: [] });
+            console.log('[REGISTER] 🧹 Cleared guild commands before global deploy');
+          }
+        } catch (e) {
+          console.error('[REGISTER] Failed to inspect/clear guild commands:', e.message);
+        }
       }
-    } catch (e) {
-      console.error('[REGISTER] Failed to inspect/clear global commands:', e.message);
-    }
-
-    if (guildId) {
+    } else {
+      // Clear global commands so they don't shadow the guild-scoped ones.
       try {
-        const oldGuild = await rest.get(Routes.applicationGuildCommands(appId, guildId));
-        console.log(`[REGISTER] Discord currently has ${oldGuild.length} GUILD command(s) in ${guildId}:`,
-          oldGuild.map(c => c.name).join(', ') || '(none)');
+        const oldGlobal = await rest.get(Routes.applicationCommands(appId));
+        console.log(`[REGISTER] Discord currently has ${oldGlobal.length} GLOBAL command(s):`,
+          oldGlobal.map(c => c.name).join(', ') || '(none)');
+        if (oldGlobal.length > 0) {
+          await rest.put(Routes.applicationCommands(appId), { body: [] });
+          console.log('[REGISTER] 🧹 Cleared global commands (using GUILD scope instead)');
+        }
       } catch (e) {
-        console.error('[REGISTER] Failed to inspect guild commands:', e.message);
+        console.error('[REGISTER] Failed to inspect/clear global commands:', e.message);
       }
     }
   }
 
-  // ── Bulk overwrite (this REPLACES everything in scope, no manual delete needed) ──
-  if (guildId) {
+  // ── Bulk overwrite (REPLACES everything in scope, no manual delete needed) ─
+  if (scope === 'guild') {
     console.log(`[REGISTER] Bulk-overwriting GUILD ${guildId} with ${commands.length} commands...`);
     await rest.put(Routes.applicationGuildCommands(appId, guildId), { body: commands });
   } else {
@@ -92,7 +111,7 @@ export async function registerCommands({ forceClean = true } = {}) {
   }
 
   // ── Verify what Discord actually has now ─────────────────────────────────
-  const verify = guildId
+  const verify = scope === 'guild'
     ? await rest.get(Routes.applicationGuildCommands(appId, guildId))
     : await rest.get(Routes.applicationCommands(appId));
   console.log(`[REGISTER] ✅ DISCORD NOW REPORTS (${verify.length}):`);
