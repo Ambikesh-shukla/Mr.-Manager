@@ -62,29 +62,70 @@ export async function deployOnStartup() {
   logger.info(`[DEPLOY] COMMAND_SCOPE=${scope.toUpperCase()}`);
 
   const commands = await loadLocalCommands();
+  const localNames = new Set(commands.map(c => c.name));
   logger.info(`[DEPLOY] Loaded ${commands.length} command(s): ${commands.map(c => c.name).join(', ') || '(none)'}`);
 
   const rest = new REST().setToken(token);
 
+  // ── Fetch existing commands from both scopes to detect stale entries ────────
+  let existingGlobal = [];
+  let existingGuild = [];
+
+  try {
+    existingGlobal = await rest.get(Routes.applicationCommands(appId));
+    logger.info(`[DEPLOY] Discord GLOBAL: ${existingGlobal.length} command(s) — ${existingGlobal.map(c => c.name).join(', ') || '(none)'}`);
+  } catch (err) {
+    logger.warn(`[DEPLOY] Could not fetch global commands: ${err.message}`);
+  }
+
+  if (guildId) {
+    try {
+      existingGuild = await rest.get(Routes.applicationGuildCommands(appId, guildId));
+      logger.info(`[DEPLOY] Discord GUILD ${guildId}: ${existingGuild.length} command(s) — ${existingGuild.map(c => c.name).join(', ') || '(none)'}`);
+    } catch (err) {
+      logger.warn(`[DEPLOY] Could not fetch guild commands: ${err.message}`);
+    }
+  }
+
+  // Identify and log stale commands in the target scope
+  const existingTarget = scope === 'global' ? existingGlobal : existingGuild;
+  const stale = existingTarget.filter(c => !localNames.has(c.name));
+  if (stale.length > 0) {
+    logger.info(`[DEPLOY] Removing ${stale.length} stale command(s) no longer in local files: ${stale.map(c => c.name).join(', ')}`);
+  }
+
   if (scope === 'global') {
-    // Clear any guild-scoped commands first to avoid duplicates in the home guild.
-    if (guildId) {
+    // Clear guild-scoped commands to prevent them from shadowing the global ones.
+    if (existingGuild.length > 0 && guildId) {
       try {
-        const guildCmds = await rest.get(Routes.applicationGuildCommands(appId, guildId));
-        if (guildCmds.length > 0) {
-          logger.info(`[DEPLOY] Clearing ${guildCmds.length} guild command(s) from guild ${guildId} before global deploy...`);
-          await rest.put(Routes.applicationGuildCommands(appId, guildId), { body: [] });
-          logger.info('[DEPLOY] Guild commands cleared');
-        }
+        logger.info(`[DEPLOY] Clearing ${existingGuild.length} guild command(s) from guild ${guildId} before global deploy...`);
+        await rest.put(Routes.applicationGuildCommands(appId, guildId), { body: [] });
+        logger.info('[DEPLOY] Guild commands cleared');
       } catch (err) {
         logger.warn(`[DEPLOY] Could not clear guild commands: ${err.message}`);
       }
     }
 
+    // Bulk overwrite global commands — replaces ALL existing global commands,
+    // which automatically removes any stale entries (e.g. old /panel).
     const deployed = await rest.put(Routes.applicationCommands(appId), { body: commands });
     logger.success(`[DEPLOY] ${deployed.length} command(s) deployed GLOBALLY (all servers). Global commands may take up to 1 hour to propagate.`);
 
   } else {
+    // Clear global commands so old globally-registered commands (e.g. /panel)
+    // don't persist alongside the guild-scoped ones.
+    if (existingGlobal.length > 0) {
+      try {
+        logger.info(`[DEPLOY] Clearing ${existingGlobal.length} global command(s) before guild deploy...`);
+        await rest.put(Routes.applicationCommands(appId), { body: [] });
+        logger.info('[DEPLOY] Global commands cleared');
+      } catch (err) {
+        logger.warn(`[DEPLOY] Could not clear global commands: ${err.message}`);
+      }
+    }
+
+    // Bulk overwrite guild commands — replaces ALL existing guild commands,
+    // which automatically removes any stale entries.
     const deployed = await rest.put(Routes.applicationGuildCommands(appId, guildId), { body: commands });
     logger.success(`[DEPLOY] ${deployed.length} command(s) deployed to GUILD ${guildId}. Guild commands update instantly.`);
   }
