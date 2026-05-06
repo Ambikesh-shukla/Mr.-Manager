@@ -10,6 +10,8 @@ const defaults = () => ({
   vouchChannel: null,
   vouchApprovalChannel: null,
   planChannel: null,
+  latestReviewMessageId: null,
+  latestReviewChannelId: null,
 });
 
 export const GuildConfig = {

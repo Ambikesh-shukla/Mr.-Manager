@@ -1,3 +1,4 @@
+import { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { logger } from '../utils/logger.js';
 import { errorEmbed } from '../utils/embeds.js';
 import { checkPermission, COMMAND_DEFAULTS } from '../utils/permissions.js';
@@ -21,7 +22,7 @@ import {
 import { Review } from '../storage/Review.js';
 import { GuildConfig } from '../storage/GuildConfig.js';
 import { Ticket } from '../storage/Ticket.js';
-import { embed, Colors } from '../utils/embeds.js';
+import { embed, Colors, successEmbed } from '../utils/embeds.js';
 import { handleWelcomeInteraction } from '../handlers/welcomeHandler.js';
 
 export default {
@@ -153,8 +154,29 @@ export default {
                 const { reviewEmbed } = await import('../utils/embeds.js');
                 const ch = await interaction.guild.channels.fetch(config.vouchChannel);
                 if (ch) {
-                  const msg = await ch.send({ embeds: [reviewEmbed(review)] });
+                  // Remove "Give Review" button from the previous review message
+                  if (config.latestReviewMessageId && config.latestReviewChannelId) {
+                    try {
+                      const prevCh = await interaction.guild.channels.fetch(config.latestReviewChannelId);
+                      if (prevCh) {
+                        const prevMsg = await prevCh.messages.fetch(config.latestReviewMessageId);
+                        if (prevMsg) await prevMsg.edit({ components: [] });
+                      }
+                    } catch { /* message may have been deleted — ignore */ }
+                  }
+
+                  // Post new review with "Give Review" button
+                  const giveReviewRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('review:give').setLabel('Give Review').setStyle(ButtonStyle.Primary),
+                  );
+                  const msg = await ch.send({ embeds: [reviewEmbed(review)], components: [giveReviewRow] });
                   Review.update(id, { messageId: msg.id });
+
+                  // Persist latest review message info so the next approval can remove its button
+                  GuildConfig.update(interaction.guild.id, {
+                    latestReviewMessageId: msg.id,
+                    latestReviewChannelId: ch.id,
+                  });
                 }
               } catch {}
             }
@@ -163,6 +185,39 @@ export default {
           if (action === 'deny') {
             Review.delete(id);
             return interaction.reply({ embeds: [embed({ description: '🗑️ Review denied and deleted.', color: Colors.error, timestamp: false })], flags: 64 });
+          }
+          if (action === 'give') {
+            const config = GuildConfig.get(interaction.guild.id);
+            if (!config.vouchApprovalChannel) {
+              return interaction.reply({ embeds: [errorEmbed('Review system not configured. Ask an admin to run `/review config`.')], flags: 64 });
+            }
+            const modal = new ModalBuilder()
+              .setCustomId('review:give:modal')
+              .setTitle('Submit a Review');
+            const ratingInput = new TextInputBuilder()
+              .setCustomId('rating')
+              .setLabel('Rating (1–5)')
+              .setStyle(TextInputStyle.Short)
+              .setPlaceholder('Enter a number from 1 to 5')
+              .setMinLength(1)
+              .setMaxLength(1)
+              .setRequired(true);
+            const reviewInput = new TextInputBuilder()
+              .setCustomId('review')
+              .setLabel('Your Review')
+              .setStyle(TextInputStyle.Paragraph)
+              .setRequired(true);
+            const serviceInput = new TextInputBuilder()
+              .setCustomId('service')
+              .setLabel('Service Used (optional)')
+              .setStyle(TextInputStyle.Short)
+              .setRequired(false);
+            modal.addComponents(
+              new ActionRowBuilder().addComponents(ratingInput),
+              new ActionRowBuilder().addComponents(reviewInput),
+              new ActionRowBuilder().addComponents(serviceInput),
+            );
+            return interaction.showModal(modal);
           }
         }
 
@@ -214,6 +269,50 @@ export default {
         if (ns === 'ticketadduser') return handleAddUserModal(interaction);
         if (ns === 'ticketremoveuser') return handleRemoveUserModal(interaction);
         if (ns === 'ticketrename') return handleRenameModal(interaction);
+
+        if (ns === 'review' && action === 'give') {
+          const ratingStr = interaction.fields.getTextInputValue('rating');
+          const rating = parseInt(ratingStr, 10);
+          if (isNaN(rating) || rating < 1 || rating > 5) {
+            return interaction.reply({ embeds: [errorEmbed('Rating must be a number between 1 and 5.')], flags: 64 });
+          }
+          const content = interaction.fields.getTextInputValue('review');
+          const service = interaction.fields.getTextInputValue('service') || '';
+          const config = GuildConfig.get(interaction.guild.id);
+          if (!config.vouchApprovalChannel) {
+            return interaction.reply({ embeds: [errorEmbed('Review system not configured. Ask an admin to run `/review config`.')], flags: 64 });
+          }
+          const review = Review.create(interaction.guild.id, {
+            userId: interaction.user.id,
+            username: interaction.user.tag,
+            rating, content, service,
+          });
+          try {
+            const approvalCh = await interaction.guild.channels.fetch(config.vouchApprovalChannel);
+            if (approvalCh) {
+              const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`review:approve:${review.id}`).setLabel('✅ Approve').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId(`review:deny:${review.id}`).setLabel('❌ Deny').setStyle(ButtonStyle.Danger),
+              );
+              await approvalCh.send({
+                embeds: [embed({
+                  title: `📝 New Review from ${interaction.user.tag}`,
+                  description: content,
+                  color: Colors.gold,
+                  fields: [
+                    { name: 'Rating', value: '⭐'.repeat(rating), inline: true },
+                    { name: 'Service', value: service || 'Not specified', inline: true },
+                  ],
+                  footer: `Review ID: ${review.id}`,
+                })],
+                components: [row],
+              });
+            }
+          } catch (err) {
+            logger.warn('Failed to send review to approval channel', err);
+          }
+          return interaction.reply({ embeds: [successEmbed('Review Submitted', 'Your review has been submitted for approval. Thank you! 🙏')], flags: 64 });
+        }
         return;
       }
 
