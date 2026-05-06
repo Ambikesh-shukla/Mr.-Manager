@@ -7,12 +7,26 @@ import { embed, Colors, errorEmbed } from '../utils/embeds.js';
 import { isAdmin } from '../utils/permissions.js';
 import { logger } from '../utils/logger.js';
 
-// ── In-memory wizard sessions ─────────────────────────────────────────────────
+// ── In-memory wizard sessions (10-minute TTL) ─────────────────────────────────
 const sessions = new Map();
+const SESSION_TTL_MS = 10 * 60 * 1000;
 
-function sessionKey(guildId, userId) { return `${guildId}:${userId}`; }
-function getSession(guildId, userId) { return sessions.get(sessionKey(guildId, userId)) ?? null; }
-function setSession(guildId, userId, data) { sessions.set(sessionKey(guildId, userId), data); }
+// Periodically remove stale sessions to prevent unbounded memory growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, session] of sessions) {
+    if (now - session.createdAt > SESSION_TTL_MS) sessions.delete(key);
+  }
+}, SESSION_TTL_MS).unref();
+
+function sessionKey(guildId, userId) { return `${guildId}_${userId}`; }
+function getSession(guildId, userId) {
+  const s = sessions.get(sessionKey(guildId, userId));
+  if (!s) return null;
+  if (Date.now() - s.createdAt > SESSION_TTL_MS) { sessions.delete(sessionKey(guildId, userId)); return null; }
+  return s;
+}
+function setSession(guildId, userId, data) { sessions.set(sessionKey(guildId, userId), { ...data, createdAt: data.createdAt ?? Date.now() }); }
 function clearSession(guildId, userId) { sessions.delete(sessionKey(guildId, userId)); }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
