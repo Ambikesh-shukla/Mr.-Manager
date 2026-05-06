@@ -21,7 +21,7 @@ function filePath(name) {
 
 export async function loadAll() {
   await ensureDir(DATA_DIR);
-  const files = ['guilds', 'panels', 'tickets', 'cooldowns', 'plans', 'reviews', 'orders', 'suggestions', 'autoresponses', 'faqs', 'commandlocks', 'welcomes'];
+  const files = ['guilds', 'panels', 'tickets', 'cooldowns', 'plans', 'reviews', 'orders', 'suggestions', 'autoresponses', 'faqs', 'commandlocks', 'welcomes', 'linkconfigs'];
   await Promise.all(files.map(f => load(f)));
   logger.success(`Storage loaded (${files.length} collections)`);
 }
