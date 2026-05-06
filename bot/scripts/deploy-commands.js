@@ -4,8 +4,11 @@
 //   COMMAND_SCOPE=global node scripts/deploy-commands.js   # deploy to all servers
 //   COMMAND_SCOPE=guild  node scripts/deploy-commands.js   # deploy to DISCORD_GUILD_ID only
 //
-// When deploying globally for the first time, any existing guild-scoped commands
-// registered under DISCORD_GUILD_ID are automatically cleared to prevent duplicates.
+// Before registering, existing commands in both scopes are fetched and compared
+// against local command files. Stale commands (removed/renamed locally) are logged.
+// The opposite scope is always cleared to prevent cross-scope duplicates:
+//   - global deploy → guild commands cleared
+//   - guild deploy  → global commands cleared
 
 import { REST, Routes } from 'discord.js';
 import { readdirSync } from 'fs';
@@ -78,28 +81,55 @@ console.log('[DEPLOY] COMMAND_SCOPE  :', scope.toUpperCase());
 console.log('');
 
 const commands = await loadLocalCommands();
+const localNames = new Set(commands.map(c => c.name));
 console.log(`[DEPLOY] Loaded ${commands.length} command(s) from disk:`, commands.map(c => c.name).join(', ') || '(none)');
 console.log('');
+
+// ── Fetch existing commands from both scopes to detect stale entries ─────────
+let existingGlobal = [];
+let existingGuild = [];
+
+try {
+  existingGlobal = await rest.get(Routes.applicationCommands(appId));
+  console.log(`[DEPLOY] Discord GLOBAL: ${existingGlobal.length} command(s) — ${existingGlobal.map(c => c.name).join(', ') || '(none)'}`);
+} catch (e) {
+  console.error('[DEPLOY] ⚠️  Could not fetch global commands:', e.message);
+}
+
+if (guildId) {
+  try {
+    existingGuild = await rest.get(Routes.applicationGuildCommands(appId, guildId));
+    console.log(`[DEPLOY] Discord GUILD ${guildId}: ${existingGuild.length} command(s) — ${existingGuild.map(c => c.name).join(', ') || '(none)'}`);
+  } catch (e) {
+    console.error('[DEPLOY] ⚠️  Could not fetch guild commands:', e.message);
+  }
+}
+console.log('');
+
+// Identify and log stale commands in the target scope
+const existingTarget = scope === 'global' ? existingGlobal : existingGuild;
+const stale = existingTarget.filter(c => !localNames.has(c.name));
+if (stale.length > 0) {
+  console.log(`[DEPLOY] 🗑️  Removing ${stale.length} stale command(s) no longer in local files: ${stale.map(c => c.name).join(', ')}`);
+  console.log('');
+}
 
 if (scope === 'global') {
   // ── Global deployment ──────────────────────────────────────────────────────
   // Clear guild commands first to avoid duplicates appearing in the main server.
-  if (guildId) {
+  if (existingGuild.length > 0 && guildId) {
     try {
-      const guildCmds = await rest.get(Routes.applicationGuildCommands(appId, guildId));
-      if (guildCmds.length > 0) {
-        console.log(`[DEPLOY] 🧹 Clearing ${guildCmds.length} guild command(s) from GUILD ${guildId} before global deploy...`);
-        await rest.put(Routes.applicationGuildCommands(appId, guildId), { body: [] });
-        console.log('[DEPLOY] ✅ Guild commands cleared');
-      } else {
-        console.log(`[DEPLOY] ℹ️  No guild commands to clear in GUILD ${guildId}`);
-      }
+      console.log(`[DEPLOY] 🧹 Clearing ${existingGuild.length} guild command(s) from GUILD ${guildId} before global deploy...`);
+      await rest.put(Routes.applicationGuildCommands(appId, guildId), { body: [] });
+      console.log('[DEPLOY] ✅ Guild commands cleared');
     } catch (e) {
       console.error('[DEPLOY] ⚠️  Could not clear guild commands:', e.message);
     }
     console.log('');
   }
 
+  // Bulk overwrite global commands — replaces ALL existing global commands,
+  // which automatically removes any stale entries (e.g. old /panel).
   console.log(`[DEPLOY] Deploying ${commands.length} command(s) GLOBALLY (all servers)...`);
   await rest.put(Routes.applicationCommands(appId), { body: commands });
 
@@ -111,6 +141,21 @@ if (scope === 'global') {
 
 } else {
   // ── Guild-scoped deployment ────────────────────────────────────────────────
+  // Clear global commands so old globally-registered commands (e.g. /panel)
+  // don't persist alongside the guild-scoped ones.
+  if (existingGlobal.length > 0) {
+    try {
+      console.log(`[DEPLOY] 🧹 Clearing ${existingGlobal.length} global command(s) before guild deploy...`);
+      await rest.put(Routes.applicationCommands(appId), { body: [] });
+      console.log('[DEPLOY] ✅ Global commands cleared');
+    } catch (e) {
+      console.error('[DEPLOY] ⚠️  Could not clear global commands:', e.message);
+    }
+    console.log('');
+  }
+
+  // Bulk overwrite guild commands — replaces ALL existing guild commands,
+  // which automatically removes any stale entries.
   console.log(`[DEPLOY] Deploying ${commands.length} command(s) to GUILD ${guildId} only...`);
   await rest.put(Routes.applicationGuildCommands(appId, guildId), { body: commands });
 
