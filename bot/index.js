@@ -43,11 +43,11 @@ async function boot() {
   logger.info('Loading storage...');
   await loadAll();
 
-  logger.info('Deploying slash commands...');
-  await deployOnStartup();
-
   logger.info('Loading commands...');
-  await loadCommands(client);
+  const commandJsons = await loadCommands(client);
+
+  logger.info('Deploying slash commands...');
+  await deployOnStartup(commandJsons);
 
   logger.info('Loading events...');
   await loadEvents(client);
