@@ -134,9 +134,6 @@ export default {
         }
 
         if (ns === 'plan_buy') return handlePlanBuy(interaction, action);
-
-        if (ns === 'suggest') return interaction.deferUpdate();
-
         if (ns === 'noop') {
           if (action === 'previewselect' || action === 'preview') return interaction.deferUpdate();
           return interaction.reply({ content: '⚠️ No ticket panel set up yet. Ask an admin to run `/setup-ticket`.', flags: 64 });
