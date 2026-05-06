@@ -17,6 +17,7 @@ export const WelcomeWizardSession = {
       backgroundUrl: base.backgroundUrl ?? null,
       logoUrl:       base.logoUrl       ?? null,
       theme:         base.theme         ?? 'dark',
+      textColor:     base.textColor     ?? null,
       mentionUser:   base.mentionUser   ?? true,
       createdAt:     Date.now(),
     };
