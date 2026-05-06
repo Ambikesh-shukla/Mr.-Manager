@@ -188,9 +188,6 @@ export default {
           }
           if (action === 'give') {
             const config = GuildConfig.get(interaction.guild.id);
-            if (!config.vouchApprovalChannel) {
-              return interaction.reply({ embeds: [errorEmbed('Review system not configured. Ask an admin to run `/review config`.')], flags: 64 });
-            }
             const modal = new ModalBuilder()
               .setCustomId('review:give:modal')
               .setTitle('Submit a Review');
@@ -279,39 +276,54 @@ export default {
           const content = interaction.fields.getTextInputValue('review');
           const service = interaction.fields.getTextInputValue('service') || '';
           const config = GuildConfig.get(interaction.guild.id);
-          if (!config.vouchApprovalChannel) {
-            return interaction.reply({ embeds: [errorEmbed('Review system not configured. Ask an admin to run `/review config`.')], flags: 64 });
-          }
           const review = Review.create(interaction.guild.id, {
             userId: interaction.user.id,
             username: interaction.user.tag,
             rating, content, service,
           });
-          try {
-            const approvalCh = await interaction.guild.channels.fetch(config.vouchApprovalChannel);
-            if (approvalCh) {
-              const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`review:approve:${review.id}`).setLabel('✅ Approve').setStyle(ButtonStyle.Success),
-                new ButtonBuilder().setCustomId(`review:deny:${review.id}`).setLabel('❌ Deny').setStyle(ButtonStyle.Danger),
-              );
-              await approvalCh.send({
-                embeds: [embed({
-                  title: `📝 New Review from ${interaction.user.tag}`,
-                  description: content,
-                  color: Colors.gold,
-                  fields: [
-                    { name: 'Rating', value: '⭐'.repeat(rating), inline: true },
-                    { name: 'Service', value: service || 'Not specified', inline: true },
-                  ],
-                  footer: `Review ID: ${review.id}`,
-                })],
-                components: [row],
-              });
+          if (config.vouchApprovalChannel) {
+            try {
+              const approvalCh = await interaction.guild.channels.fetch(config.vouchApprovalChannel);
+              if (approvalCh) {
+                const row = new ActionRowBuilder().addComponents(
+                  new ButtonBuilder().setCustomId(`review:approve:${review.id}`).setLabel('✅ Approve').setStyle(ButtonStyle.Success),
+                  new ButtonBuilder().setCustomId(`review:deny:${review.id}`).setLabel('❌ Deny').setStyle(ButtonStyle.Danger),
+                );
+                await approvalCh.send({
+                  embeds: [embed({
+                    title: `📝 New Review from ${interaction.user.tag}`,
+                    description: content,
+                    color: Colors.gold,
+                    fields: [
+                      { name: 'Rating', value: '⭐'.repeat(rating), inline: true },
+                      { name: 'Service', value: service || 'Not specified', inline: true },
+                    ],
+                    footer: `Review ID: ${review.id}`,
+                  })],
+                  components: [row],
+                });
+              }
+            } catch (err) {
+              logger.warn('Failed to send review to approval channel', err);
             }
-          } catch (err) {
-            logger.warn('Failed to send review to approval channel', err);
+            return interaction.reply({ embeds: [successEmbed('Review Submitted', 'Your review has been submitted for approval. Thank you! 🙏')], flags: 64 });
           }
-          return interaction.reply({ embeds: [successEmbed('Review Submitted', 'Your review has been submitted for approval. Thank you! 🙏')], flags: 64 });
+          // No approval channel — post review directly in the current channel
+          try {
+            const { reviewEmbed } = await import('../utils/embeds.js');
+            const giveReviewRow = new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId('review:give').setLabel('Give Review').setStyle(ButtonStyle.Primary),
+            );
+            const msg = await interaction.channel.send({ embeds: [reviewEmbed(review)], components: [giveReviewRow] });
+            Review.update(review.id, { approved: true, messageId: msg.id });
+            GuildConfig.update(interaction.guild.id, {
+              latestReviewMessageId: msg.id,
+              latestReviewChannelId: interaction.channel.id,
+            });
+          } catch (err) {
+            logger.warn('Failed to post review in current channel', err);
+          }
+          return interaction.reply({ embeds: [successEmbed('Review Submitted', 'Your review has been posted. Thank you! 🙏')], flags: 64 });
         }
         return;
       }
