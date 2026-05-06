@@ -8,6 +8,9 @@
     "start": "node index.js",
     "dev": "node --watch index.js",
     "register": "node handlers/registerCommands.js",
+    "deploy": "node scripts/deploy-commands.js",
+    "deploy:global": "COMMAND_SCOPE=global node scripts/deploy-commands.js",
+    "deploy:guild": "COMMAND_SCOPE=guild node scripts/deploy-commands.js",
     "clear-commands": "node scripts/clear-commands.js",
     "fix-dupes": "node scripts/fix_duplicate_slash_cmds.js"
   },
