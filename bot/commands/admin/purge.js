@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
+import { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } from 'discord.js';
 import { successEmbed, errorEmbed } from '../../utils/embeds.js';
 
 export default {
@@ -29,7 +29,7 @@ export default {
       const count = interaction.options.getInteger('count');
 
       // Defer ephemerally so we have time to fetch & delete
-      await interaction.deferReply({ flags: 64 });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       // Fetch messages (up to 100 per Discord limit)
       let messages;
