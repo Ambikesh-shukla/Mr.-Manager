@@ -1,4 +1,5 @@
 import { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType } from 'discord.js';
+
 import { Plan } from '../../storage/Plan.js';
 import { GuildConfig } from '../../storage/GuildConfig.js';
 import { successEmbed, errorEmbed, planEmbed, embed, Colors } from '../../utils/embeds.js';
@@ -36,10 +37,7 @@ export default {
       .addStringOption(o => o.setName('plan_id').setDescription('Plan ID to delete').setRequired(true)))
     .addSubcommand(s => s.setName('list')
       .setDescription('View all available plans')
-      .addBooleanOption(o => o.setName('public').setDescription('Post publicly in channel?').setRequired(false)))
-    .addSubcommand(s => s.setName('config')
-      .setDescription('Set the default channel where new plans get posted')
-      .addChannelOption(o => o.setName('channel').setDescription('Default plan channel').addChannelTypes(ChannelType.GuildText).setRequired(true))),
+      .addBooleanOption(o => o.setName('public').setDescription('Post publicly in channel?').setRequired(false))),
 
   defaultLevel: 'admin',
   subcommandDefaults: { list: 'public' },
@@ -47,37 +45,15 @@ export default {
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
 
-    // ── config ─────────────────────────────────────────────────────────────
-    if (sub === 'config') {
-      const ch = interaction.options.getChannel('channel');
-      GuildConfig.set(interaction.guild.id, { planChannel: ch.id });
-      return interaction.reply({
-        embeds: [successEmbed('Plan Channel Set', `New plans will be posted in <#${ch.id}> by default.`)],
-        flags: 64,
-      });
-    }
-
     // ── create ─────────────────────────────────────────────────────────────
     if (sub === 'create') {
       const config = GuildConfig.get(interaction.guild.id);
       const overrideCh = interaction.options.getChannel('channel');
-      const targetChannelId = overrideCh?.id ?? config.planChannel;
-
-      if (!targetChannelId) {
-        return interaction.reply({
-          embeds: [errorEmbed('No plan channel configured. Run `/plan config channel:#your-channel` first, or pass `channel:` when creating.')],
-          flags: 64,
-        });
-      }
-
-      const targetCh = interaction.guild.channels.cache.get(targetChannelId)
-        ?? await interaction.guild.channels.fetch(targetChannelId).catch(() => null);
-
-      if (!targetCh || !targetCh.isTextBased?.()) {
-        return interaction.reply({
-          embeds: [errorEmbed(`Configured plan channel <#${targetChannelId}> is missing or not a text channel. Update with \`/plan config\`.`)],
-          flags: 64,
-        });
+      let targetCh = overrideCh ?? interaction.channel;
+      if (!overrideCh && config.planChannel) {
+        targetCh = interaction.guild.channels.cache.get(config.planChannel)
+          ?? await interaction.guild.channels.fetch(config.planChannel).catch(() => null)
+          ?? interaction.channel;
       }
 
       const plan = Plan.create(interaction.guild.id, {
