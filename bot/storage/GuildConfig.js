@@ -6,7 +6,6 @@ const defaults = () => ({
   logChannel: null,
   staffRoles: [],
   autoResponses: [],
-  suggestionChannel: null,
   vouchChannel: null,
   vouchApprovalChannel: null,
   planChannel: null,

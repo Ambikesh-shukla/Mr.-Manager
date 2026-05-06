@@ -34,7 +34,6 @@ export default {
               '`/order create/update/list` — Manage customer orders',
               '`/plan create/delete/list/sales/config` — Hosting plans & sales panel',
               '`/review config/list` — Configure & view reviews',
-              '`/suggest config` — Set suggestion channel',
             ].join('\n'),
             inline: false,
           },
@@ -56,7 +55,6 @@ export default {
             name: '🌐 Public Commands *(Everyone)*',
             value: [
               '`/review submit` — Submit a review/vouch',
-              '`/suggest submit` — Submit a suggestion',
               '`/afk set/remove/status` — AFK status with auto-reply on mention',
               '`/serverinfo` — Server statistics',
               '`/ping` — Bot latency check',
