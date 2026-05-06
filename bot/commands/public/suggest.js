@@ -1,6 +1,8 @@
 import { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { GuildConfig } from '../../storage/GuildConfig.js';
+import { Suggestion } from '../../storage/Suggestion.js';
 import { embed, successEmbed, errorEmbed, Colors } from '../../utils/embeds.js';
+import { randomUUID } from 'crypto';
 
 export default {
   data: new SlashCommandBuilder()
@@ -16,9 +18,11 @@ export default {
     const text = interaction.options.getString('suggestion');
     const config = GuildConfig.get(interaction.guild.id);
 
+    const suggestionId = randomUUID();
+
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('suggest:up').setLabel('👍 Upvote').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('suggest:down').setLabel('👎 Downvote').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(`suggest:up:${suggestionId}`).setLabel('👍 Upvote (0)').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`suggest:down:${suggestionId}`).setLabel('👎 Downvote (0)').setStyle(ButtonStyle.Danger),
     );
 
     const targetCh = config.suggestionChannel
@@ -26,7 +30,7 @@ export default {
       : interaction.channel;
 
     try {
-      await targetCh.send({
+      const msg = await targetCh.send({
         embeds: [embed({
           title: '💡 New Suggestion',
           description: text,
@@ -36,6 +40,16 @@ export default {
         })],
         components: [row],
       });
+
+      Suggestion.create({
+        id: suggestionId,
+        guildId: interaction.guild.id,
+        channelId: targetCh.id,
+        messageId: msg.id,
+        text,
+        submitterId: interaction.user.id,
+      });
+
       return interaction.reply({ embeds: [successEmbed('Suggestion Submitted', 'Your suggestion has been posted!')], flags: 64 });
     } catch {
       return interaction.reply({ embeds: [errorEmbed('Failed to post suggestion.')], flags: 64 });
