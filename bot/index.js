@@ -6,6 +6,7 @@ import { loadAll } from './storage/db.js';
 import { loadCommands } from './handlers/commandHandler.js';
 import { loadEvents } from './handlers/eventHandler.js';
 import { logger } from './utils/logger.js';
+import { deployOnStartup } from './utils/deployOnStartup.js';
 
 const { DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID } = process.env;
 
@@ -41,6 +42,9 @@ process.on('uncaughtException', (err) => {
 async function boot() {
   logger.info('Loading storage...');
   await loadAll();
+
+  logger.info('Deploying slash commands...');
+  await deployOnStartup();
 
   logger.info('Loading commands...');
   await loadCommands(client);
