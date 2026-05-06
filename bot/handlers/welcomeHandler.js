@@ -359,10 +359,10 @@ function isValidUrl(str) {
   return /^https?:\/\/.{4,}/.test(str) && !str.includes(' ') && str.length < 500;
 }
 
-// Validate hex color (3 or 6 hex digits, with or without leading #)
+// Validate hex color (exactly 6 hex digits, with or without leading #)
 function isValidHexColor(str) {
   if (!str) return true; // empty = clear is fine
-  return /^#?[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(str);
+  return /^#?[0-9a-fA-F]{6}$/.test(str);
 }
 
 // Strip leading # from a hex color value for use in the API
@@ -374,7 +374,7 @@ function showColorModal(interaction, session) {
   const { section } = session;
   const input = new TextInputBuilder()
     .setCustomId('value')
-    .setLabel('Text Color (hex, e.g. ffffff or #00ff99)')
+    .setLabel('Text Color (6-digit hex, e.g. ffffff or #00ff99)')
     .setStyle(TextInputStyle.Short)
     .setPlaceholder('ffffff')
     .setMaxLength(7)
@@ -585,7 +585,7 @@ export async function handleWelcomeInteraction(interaction, parts) {
 
       if (field === 'textColor') {
         if (raw && !isValidHexColor(raw)) {
-          return interaction.reply({ embeds: [errorEmbed('Please enter a valid hex color, e.g. `ffffff` or `#00ff99`.')], flags: 64 });
+          return interaction.reply({ embeds: [errorEmbed('Please enter a valid 6-digit hex color, e.g. `ffffff` or `#00ff99`.')], flags: 64 });
         }
         const session = WelcomeWizardSession.get(interaction.guildId, interaction.user.id, section);
         if (!session) {
