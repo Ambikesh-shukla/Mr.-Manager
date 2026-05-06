@@ -10,6 +10,7 @@ function defaultSection() {
     backgroundUrl: null,
     logoUrl: null,
     theme: 'dark',
+    textColor: null,
     mentionUser: true,
   };
 }

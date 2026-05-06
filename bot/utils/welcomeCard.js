@@ -27,16 +27,17 @@ const MIN_IMAGE_BYTES = 1024;  // API error payloads are typically < 100 bytes
 const PNG_MAGIC  = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
 const JPEG_MAGIC = Buffer.from([0xff, 0xd8]);
 
-export async function generateWelcomeCard({ username, avatarUrl, backgroundUrl, logoUrl, text, theme = 'dark' }) {
+export async function generateWelcomeCard({ username, avatarUrl, backgroundUrl, logoUrl, text, theme = 'dark', textColor }) {
   const themeConfig = THEMES[theme] ?? THEMES.dark;
   const bg = backgroundUrl || themeConfig.bg;
+  const color = textColor || themeConfig.color;
 
   const params = new URLSearchParams({
     background: bg,
     avatar:     avatarUrl,
     username:   username.slice(0, 32),
     text:       text.slice(0, 60),
-    color:      themeConfig.color,
+    color,
   });
 
   const apiUrl = `https://api.popcat.xyz/welcomecard?${params}`;
@@ -112,14 +113,27 @@ export async function buildWelcomePayload({ member, config, section }) {
     logoUrl:       config.logoUrl,
     text:          resolvedText,
     theme:         config.theme,
+    textColor:     config.textColor,
   });
 
   if (card) {
-    const attachment = buildCardAttachment(card, section === 'welcome' ? 'welcome.png' : 'goodbye.png');
+    const filename   = section === 'welcome' ? 'welcome.png' : 'goodbye.png';
+    const attachment = buildCardAttachment(card, filename);
+    const themeConfig  = THEMES[config.theme ?? 'dark'] ?? THEMES.dark;
+    const thumbnailUrl = config.logoUrl || member.guild.iconURL() || null;
+
+    const cardEmbed = new EmbedBuilder()
+      .setColor(themeConfig.accent)
+      .setImage(`attachment://${filename}`)
+      .setFooter({ text: `Members: ${member.guild.memberCount}` })
+      .setTimestamp();
+
+    if (thumbnailUrl) cardEmbed.setThumbnail(thumbnailUrl);
+
     return {
-      content:     mentionStr ?? undefined,
-      files:       [attachment],
-      embeds:      [],
+      content: mentionStr ?? undefined,
+      embeds:  [cardEmbed],
+      files:   [attachment],
     };
   }
 

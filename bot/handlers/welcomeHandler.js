@@ -16,7 +16,7 @@ import { logger } from '../utils/logger.js';
 const STATUS       = (enabled) => enabled ? '✅ Enabled' : '❌ Disabled';
 const CHAN         = (id)      => id ? `<#${id}>` : '`Not set`';
 const SECTION_LABEL = (s)     => s === 'welcome' ? '👋 Welcome' : '🚪 Goodbye';
-const TOTAL_WIZARD_STEPS = 6;
+const TOTAL_WIZARD_STEPS = 7;
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
@@ -220,11 +220,32 @@ async function showWizardStep5(interaction, session) {
   return interaction.reply({ ...payload, flags: 64 });
 }
 
-// Step 6 — Mention user
+// Step 6 — Text Color
 async function showWizardStep6(interaction, session) {
   const { section } = session;
+  const e = wizardEmbed(section, 6, 'Text Color',
+    'Enter a **hex color code** (e.g. `ffffff`) for the text on the welcome card.\nLeave blank to use the theme default.',
+    [{ name: '🎨 Current Text Color', value: session.textColor ? `\`#${session.textColor}\`` : '`Not set — theme default`', inline: true }],
+  );
+  const payload = {
+    embeds: [e],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`welcome:wiz:btn:${section}:color`).setLabel('Set Text Color').setEmoji('🎨').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`welcome:wiz:btn:${section}:color_skip`).setLabel('Skip').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
+      ),
+      navRow(section, 'theme'),
+    ],
+  };
+  if (interaction.replied || interaction.deferred) return interaction.editReply(payload);
+  return interaction.reply({ ...payload, flags: 64 });
+}
+
+// Step 7 — Mention user
+async function showWizardStep7(interaction, session) {
+  const { section } = session;
   const yes = session.mentionUser;
-  const e = wizardEmbed(section, 6, 'Mention User',
+  const e = wizardEmbed(section, 7, 'Mention User',
     `Should the bot **@mention** the user when sending the ${section} message?`,
     [{ name: '🔔 Current Setting', value: yes ? '`Yes — mention`' : '`No — silent`', inline: true }],
   );
@@ -235,14 +256,14 @@ async function showWizardStep6(interaction, session) {
         new ButtonBuilder().setCustomId(`welcome:wiz:btn:${section}:mention_yes`).setLabel('Yes — Mention').setEmoji('🔔').setStyle(yes ? ButtonStyle.Success : ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(`welcome:wiz:btn:${section}:mention_no`).setLabel('No — Silent').setEmoji('🔕').setStyle(!yes ? ButtonStyle.Success : ButtonStyle.Secondary),
       ),
-      navRow(section, 'theme'),
+      navRow(section, 'textcolor'),
     ],
   };
   if (interaction.replied || interaction.deferred) return interaction.editReply(payload);
   return interaction.reply({ ...payload, flags: 64 });
 }
 
-// Step 7 — Preview & Save
+// Preview & Save
 async function showWizardPreview(interaction, session) {
   const { section } = session;
   const label = SECTION_LABEL(section);
@@ -259,6 +280,7 @@ async function showWizardPreview(interaction, session) {
       { name: '💬 Message',      value: session.message ? `\`${session.message.slice(0, 80)}${session.message.length > 80 ? '…' : ''}\`` : `*Default*`, inline: false },
       { name: '🖼️ Background',   value: session.backgroundUrl ? '`Set ✅`' : '`Not set — theme default`', inline: true },
       { name: '🏷️ Logo',         value: session.logoUrl ? '`Set ✅`' : '`Not set`', inline: true },
+      { name: '🎨 Text Color',   value: session.textColor ? `\`#${session.textColor}\`` : '`Theme default`', inline: true },
     )
     .setFooter({ text: 'Save & Enable will immediately activate on member join/leave.' })
     .setTimestamp();
@@ -335,6 +357,34 @@ function showUrlModal(interaction, session, field) {
 function isValidUrl(str) {
   if (!str) return true; // empty = clear/skip is fine
   return /^https?:\/\/.{4,}/.test(str) && !str.includes(' ') && str.length < 500;
+}
+
+// Validate hex color (3 or 6 hex digits, with or without leading #)
+function isValidHexColor(str) {
+  if (!str) return true; // empty = clear is fine
+  return /^#?[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(str);
+}
+
+// Strip leading # from a hex color value for use in the API
+function normalizeHexColor(str) {
+  return str ? str.replace(/^#/, '') : null;
+}
+
+function showColorModal(interaction, session) {
+  const { section } = session;
+  const input = new TextInputBuilder()
+    .setCustomId('value')
+    .setLabel('Text Color (hex, e.g. ffffff or #00ff99)')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('ffffff')
+    .setMaxLength(7)
+    .setRequired(false);
+  if (session.textColor) input.setValue(`#${session.textColor}`);
+  const modal = new ModalBuilder()
+    .setCustomId(`welcome:wiz:modal:${section}:textColor`)
+    .setTitle(`${SECTION_LABEL(section)} — Text Color`)
+    .addComponents(new ActionRowBuilder().addComponents(input));
+  return interaction.showModal(modal);
 }
 
 // ── Preview ───────────────────────────────────────────────────────────────────
@@ -452,17 +502,20 @@ export async function handleWelcomeInteraction(interaction, parts) {
       if (action === 'back_background') { await interaction.deferUpdate(); return showWizardStep3(interaction, session); }
       if (action === 'back_logo')       { await interaction.deferUpdate(); return showWizardStep4(interaction, session); }
       if (action === 'back_theme')      { await interaction.deferUpdate(); return showWizardStep5(interaction, session); }
-      if (action === 'back_mention')    { await interaction.deferUpdate(); return showWizardStep6(interaction, session); }
+      if (action === 'back_textcolor')  { await interaction.deferUpdate(); return showWizardStep6(interaction, session); }
+      if (action === 'back_mention')    { await interaction.deferUpdate(); return showWizardStep7(interaction, session); }
 
       // Open modals (must NOT defer before showModal)
-      if (action === 'msg')  return showMessageModal(interaction, session);
-      if (action === 'bg')   return showUrlModal(interaction, session, 'backgroundUrl');
-      if (action === 'logo') return showUrlModal(interaction, session, 'logoUrl');
+      if (action === 'msg')   return showMessageModal(interaction, session);
+      if (action === 'bg')    return showUrlModal(interaction, session, 'backgroundUrl');
+      if (action === 'logo')  return showUrlModal(interaction, session, 'logoUrl');
+      if (action === 'color') return showColorModal(interaction, session);
 
       // Skip buttons — advance without changing value
-      if (action === 'msg_skip')  { await interaction.deferUpdate(); return showWizardStep3(interaction, session); }
-      if (action === 'bg_skip')   { await interaction.deferUpdate(); return showWizardStep4(interaction, session); }
-      if (action === 'logo_skip') { await interaction.deferUpdate(); return showWizardStep5(interaction, session); }
+      if (action === 'msg_skip')    { await interaction.deferUpdate(); return showWizardStep3(interaction, session); }
+      if (action === 'bg_skip')     { await interaction.deferUpdate(); return showWizardStep4(interaction, session); }
+      if (action === 'logo_skip')   { await interaction.deferUpdate(); return showWizardStep5(interaction, session); }
+      if (action === 'color_skip')  { await interaction.deferUpdate(); return showWizardStep7(interaction, session); }
 
       // Mention choice
       if (action === 'mention_yes') {
@@ -491,6 +544,7 @@ export async function handleWelcomeInteraction(interaction, parts) {
             backgroundUrl: session.backgroundUrl,
             logoUrl:       session.logoUrl,
             theme:         session.theme,
+            textColor:     session.textColor,
             mentionUser:   session.mentionUser,
             enabled:       true,
           };
@@ -509,10 +563,11 @@ export async function handleWelcomeInteraction(interaction, parts) {
         }
         WelcomeConfig.updateSection(interaction.guildId, section, {
           channelId:     session.channelId,
-          message:       session.message   || null,
-          backgroundUrl: session.backgroundUrl || null,
-          logoUrl:       session.logoUrl   || null,
+          message:       session.message        || null,
+          backgroundUrl: session.backgroundUrl  || null,
+          logoUrl:       session.logoUrl        || null,
           theme:         session.theme,
+          textColor:     session.textColor      || null,
           mentionUser:   session.mentionUser,
           enabled:       action === 'save_enable',
         });
@@ -525,8 +580,22 @@ export async function handleWelcomeInteraction(interaction, parts) {
 
     // ── Wizard modal submissions: welcome:wiz:modal:{section}:{field} ───────
     if (subtype === 'modal') {
-      const field = action; // message | backgroundUrl | logoUrl
+      const field = action; // message | backgroundUrl | logoUrl | textColor
       const raw   = interaction.fields.getTextInputValue('value')?.trim() || null;
+
+      if (field === 'textColor') {
+        if (raw && !isValidHexColor(raw)) {
+          return interaction.reply({ embeds: [errorEmbed('Please enter a valid hex color, e.g. `ffffff` or `#00ff99`.')], flags: 64 });
+        }
+        const session = WelcomeWizardSession.get(interaction.guildId, interaction.user.id, section);
+        if (!session) {
+          return interaction.reply({ embeds: [errorEmbed('Setup session expired. Run `/welcome` again.')], flags: 64 });
+        }
+        WelcomeWizardSession.update(interaction.guildId, interaction.user.id, section, { textColor: normalizeHexColor(raw) });
+        const updatedSession = WelcomeWizardSession.get(interaction.guildId, interaction.user.id, section);
+        await interaction.deferUpdate();
+        return showWizardStep7(interaction, updatedSession);
+      }
 
       if (field !== 'message' && raw && !isValidUrl(raw)) {
         return interaction.reply({ embeds: [errorEmbed('Please enter a valid image URL starting with `https://`.')], flags: 64 });
