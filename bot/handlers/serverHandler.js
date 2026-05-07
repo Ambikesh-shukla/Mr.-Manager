@@ -157,7 +157,9 @@ function renderServerName(format, user) {
 function getUserInviteCount(invites, userId) {
   let total = 0;
   for (const inv of invites.values()) {
-    if (inv.inviter?.id === userId) total += inv.uses ?? 0;
+    if (inv.inviter?.id !== userId) continue;
+    if (!Number.isFinite(inv.uses)) continue;
+    total += inv.uses;
   }
   return total;
 }
@@ -173,7 +175,7 @@ async function fetchInviteCountForMember(guild, userId) {
 
 function getEligibilityState(data, panelSetup, userId, inviteCount) {
   const requirement = Math.max(0, Number(panelSetup?.inviteRequirement ?? data.inviteRequirement ?? 0) || 0);
-  const maxServersPerUser = Math.max(1, Number(panelSetup?.maxServersPerUser ?? 1) || 1);
+  const maxServersPerUser = Math.max(1, Number(panelSetup?.maxServersPerUser) || 1);
   const cooldownHours = Math.max(0, Number(panelSetup?.cooldownHours ?? 0) || 0);
   const servers = Array.isArray(data.createdServerRecords?.[userId]) ? data.createdServerRecords[userId] : [];
   const cooldownRef = data.cooldowns?.[userId] ?? {};
@@ -240,6 +242,10 @@ function buildProvisionPayload(panelSetup, user, idempotencyKey, inviteCount) {
   };
 }
 
+function hoursToMs(hours) {
+  return Math.max(0, Number(hours) || 0) * MS_PER_HOUR;
+}
+
 async function callPanelApi(panelSetup, method, endpoint, body) {
   const apiKey = decryptApiKey(panelSetup);
   if (!apiKey) {
@@ -260,7 +266,9 @@ async function callPanelApi(panelSetup, method, endpoint, body) {
     let parsed = null;
     try {
       parsed = raw ? JSON.parse(raw) : null;
-    } catch {}
+    } catch (err) {
+      logger.warn(`Panel API returned non-JSON response (${err?.message ?? 'parse error'})`);
+    }
     if (!response.ok) {
       return {
         ok: false,
@@ -272,7 +280,8 @@ async function callPanelApi(panelSetup, method, endpoint, body) {
       };
     }
     return { ok: true, status: response.status, data: parsed ?? raw ?? null };
-  } catch {
+  } catch (err) {
+    logger.warn(`Panel API request failed: ${err?.message ?? 'unknown error'}`);
     return { ok: false, error: 'Failed to reach panel API endpoint.' };
   }
 }
@@ -701,7 +710,7 @@ export async function handleServerInteraction(interaction, parts) {
         claim.lastClaimAt = createdAtIso;
         claim.lastInviteSnapshot = inviteCount;
         if (eligibility.cooldownHours > 0) {
-          cooldowns.nextClaimAt = Date.now() + (eligibility.cooldownHours * MS_PER_HOUR);
+          cooldowns.nextClaimAt = Date.now() + hoursToMs(eligibility.cooldownHours);
         } else {
           delete cooldowns.nextClaimAt;
         }
@@ -1011,7 +1020,9 @@ export async function handleServerInteraction(interaction, parts) {
           lastClaimAt: null,
           lastInviteSnapshot: null,
         };
-        delete cooldowns[targetUserId]?.nextClaimAt;
+        if (cooldowns[targetUserId]) {
+          delete cooldowns[targetUserId].nextClaimAt;
+        }
         ServerProvision.updateGuild(guildId, { userClaims: claims, cooldowns });
         await sendAdminLog(interaction.guild, {
           embeds: [embed({
