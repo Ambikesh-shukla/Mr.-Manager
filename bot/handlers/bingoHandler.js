@@ -341,17 +341,17 @@ function startBotGameState(userId, channelId, messageId) {
 async function runBotTurn(game) {
   const botBoard = game.boards[BOT_KEY];
   const options = botBoard.rows.flat().filter((n) => !botBoard.marked.has(n));
-  if (options.length === 0) return null;
+  if (options.length === 0) return { winner: null, pick: null };
 
   const pick = options[Math.floor(Math.random() * options.length)];
   botBoard.marked.add(pick);
   touch(game);
 
   const winner = winnerOf(game);
-  if (winner) return winner;
+  if (winner) return { winner, pick };
 
   game.turnUserId = game.challengerId;
-  return null;
+  return { winner: null, pick };
 }
 
 export async function startBingo(interaction) {
@@ -462,7 +462,7 @@ export async function handleBingoButton(interaction, parts) {
 
     if (ensureUserFree(game.challengerId) || userToGame.get(game.challengerId) !== game.id) {
       await interaction.update({
-        embeds: [embed({ title: '⚠️ Challenge expired', description: 'Challenger is now busy in another game.', color: Colors.warning, timestamp: false })],
+        embeds: [embed({ title: '⚠️ Challenge expired', description: 'Challenger is no longer available for this challenge.', color: Colors.warning, timestamp: false })],
         components: [],
       });
       games.delete(game.id);
@@ -605,14 +605,14 @@ export async function handleBingoStringSelect(interaction, parts) {
 
   if (game.mode === 'bot') {
     game.turnUserId = BOT_KEY;
-    const botWinner = await runBotTurn(game);
+    const botTurn = await runBotTurn(game);
 
-    if (botWinner) {
+    if (botTurn.winner) {
       await interaction.update({
         embeds: [embed({
           title: '🏆 Bingo Winner',
-          description: `${mentionFor(botWinner)} wins!`,
-          color: botWinner === BOT_KEY ? Colors.error : Colors.success,
+          description: `${mentionFor(botTurn.winner)} wins!`,
+          color: botTurn.winner === BOT_KEY ? Colors.error : Colors.success,
           fields: [
             {
               name: `${mentionFor(game.playerIds[0])} • Lines: ${completedLines(game.boards[game.playerIds[0]])}`,
@@ -635,7 +635,7 @@ export async function handleBingoStringSelect(interaction, parts) {
     }
 
     return interaction.update({
-      embeds: [buildGameEmbed(game, 'You marked, then bot marked automatically. Your turn again.')],
+      embeds: [buildGameEmbed(game, `You marked, bot marked **${pad(botTurn.pick)}**. Your turn again.`)],
       components: buildGameComponents(game),
     });
   }
