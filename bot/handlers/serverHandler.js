@@ -14,6 +14,9 @@ import { embed, Colors, errorEmbed } from '../utils/embeds.js';
 import { isAdmin } from '../utils/permissions.js';
 
 const setupSessions = new Map();
+const API_TEST_TIMEOUT_MS = 10_000;
+const MIN_API_TOKEN_LENGTH = 8;
+const TOTAL_SETUP_STEPS = 11;
 
 const PROVIDERS = [
   { label: 'Pterodactyl', value: 'pterodactyl', description: 'Official Application API only' },
@@ -109,7 +112,7 @@ async function testPanelApi(session) {
   }
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10_000);
+  const timer = setTimeout(() => controller.abort(), API_TEST_TIMEOUT_MS);
   try {
     const endpoint = ['pterodactyl', 'pelican', 'wisp'].includes(session.provider)
       ? `${session.baseUrl}/api/application/nodes`
@@ -120,7 +123,7 @@ async function testPanelApi(session) {
       headers: {
         Accept: 'application/json',
         Authorization: `Bearer ${session.apiKey}`,
-        'User-Agent': 'Mr-Manager/ServerSetup',
+        'User-Agent': 'Mr. Manager/ServerSetup',
       },
     });
     if (res.ok) {
@@ -144,7 +147,7 @@ async function testPanelApi(session) {
 function buildSetupEmbed(session) {
   if (session.step === 10) {
     return embed({
-      title: '🧪 Step 10/11 — Preview Configuration',
+      title: `🧪 Step 10/${TOTAL_SETUP_STEPS} — Preview Configuration`,
       color: Colors.info,
       description:
         'Review settings, test API connection, then save.\n' +
@@ -181,7 +184,7 @@ function buildSetupEmbed(session) {
   };
 
   return embed({
-    title: `⚙️ Step ${session.step}/11 — Panel Setup`,
+    title: `⚙️ Step ${session.step}/${TOTAL_SETUP_STEPS} — Panel Setup`,
     color: Colors.primary,
     description: `${stepText[session.step] ?? 'Continue setup.'}\n\nSafety: official APIs only, no passwords, no scraping.`,
     fields: [
@@ -265,7 +268,7 @@ function buildSimpleModal(customId, title, label, placeholder, value = '', maxLe
 
 function buildModalForField(session, field) {
   if (field === 'baseurl') return buildSimpleModal('server:modal:baseurl', 'API Base URL', 'Enter API base URL', 'https://panel.example.com', session.baseUrl, 300);
-  if (field === 'apikey') return buildSimpleModal('server:modal:apikey', 'API Token', 'Enter API key/token', 'ptla_xxxxxxxxx', '', 300);
+  if (field === 'apikey') return buildSimpleModal('server:modal:apikey', 'API Token (keep private)', 'Enter API key/token', 'Enter your API token', '', 300);
   if (field === 'node') return buildSimpleModal('server:modal:node', 'Node / Location', 'Enter node/location', 'node-1 or us-east', session.nodeLocation, 80);
   if (field === 'egg') return buildSimpleModal('server:modal:egg', 'Minecraft Egg/Template', 'Enter egg/template', 'minecraft-java', session.eggTemplate, 80);
   if (field === 'nameformat') return buildSimpleModal('server:modal:nameformat', 'Server Name Format', 'Enter naming format', '{username}-minecraft', session.serverNameFormat, 80);
@@ -285,7 +288,15 @@ function buildModalForField(session, field) {
     const modal = new ModalBuilder().setCustomId('server:modal:cooldownmax').setTitle('Cooldown & Max Servers');
     modal.addComponents(
       new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cooldown').setLabel('Cooldown Hours').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(session.cooldownHours)).setMaxLength(5)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('maxservers').setLabel('Max Servers Per User').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(session.maxServersPerUser)).setMaxLength(5)),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('maxservers')
+          .setLabel('Max Servers Per User (min 1)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(String(session.maxServersPerUser))
+          .setMaxLength(5),
+      ),
     );
     return modal;
   }
@@ -344,7 +355,7 @@ function buildDashboard(guildId, userId, isUserAdmin) {
             : 'Not configured',
           inline: true,
         },
-        { name: 'Invite Requirement', value: String(panelSetup?.inviteRequirement ?? data.inviteRequirement ?? 0), inline: true },
+        { name: 'Invite Requirement', value: String(panelSetup?.inviteRequirement ?? data.inviteRequirement), inline: true },
         { name: 'My Claims', value: userClaim ? `Used: ${userClaim.claimCount ?? 0}` : 'None yet', inline: true },
         { name: 'My Servers', value: String(userServers.length), inline: true },
       ],
@@ -381,6 +392,12 @@ export async function handleServerInteraction(interaction, parts) {
     if (action === 'setup') {
       if (!admin) {
         return interaction.reply({ embeds: [errorEmbed('You need **Administrator** permission for this control.')], flags: MessageFlags.Ephemeral });
+      }
+      if (!getSecretKey()) {
+        return interaction.reply({
+          embeds: [errorEmbed('Missing `SERVER_PANEL_SECRET` env. Add it before running setup so API tokens are encrypted.')],
+          flags: MessageFlags.Ephemeral,
+        });
       }
       const session = upsertSession(guildId, userId);
       session.step = 1;
@@ -517,7 +534,7 @@ export async function handleServerInteraction(interaction, parts) {
       clearSession(guildId, userId);
       return interaction.update({
         embeds: [embed({
-          title: '✅ Step 11/11 — Setup Saved',
+          title: `✅ Step ${TOTAL_SETUP_STEPS}/${TOTAL_SETUP_STEPS} — Setup Saved`,
           description: 'Panel API setup saved successfully and will persist across restarts.',
           color: Colors.success,
           fields: [
@@ -569,8 +586,8 @@ export async function handleServerInteraction(interaction, parts) {
 
     if (field === 'apikey') {
       const value = interaction.fields.getTextInputValue('value').trim();
-      if (value.length < 8) {
-        return interaction.reply({ embeds: [errorEmbed('API token looks too short.')], flags: MessageFlags.Ephemeral });
+      if (value.length < MIN_API_TOKEN_LENGTH) {
+        return interaction.reply({ embeds: [errorEmbed(`API token must be at least ${MIN_API_TOKEN_LENGTH} characters.`)], flags: MessageFlags.Ephemeral });
       }
       session.apiKey = value;
       session.step = 4;
@@ -620,9 +637,13 @@ export async function handleServerInteraction(interaction, parts) {
 
     if (field === 'cooldownmax') {
       const cooldownHours = parseNonNegativeInt(interaction.fields.getTextInputValue('cooldown'));
-      const maxServersPerUser = Math.max(1, parseNonNegativeInt(interaction.fields.getTextInputValue('maxservers'), 1));
+      const rawMax = interaction.fields.getTextInputValue('maxservers').trim();
+      const parsedMax = Number.parseInt(rawMax, 10);
+      if (Number.isNaN(parsedMax) || parsedMax < 1) {
+        return interaction.reply({ embeds: [errorEmbed('Max servers per user must be at least 1.')], flags: MessageFlags.Ephemeral });
+      }
       session.cooldownHours = cooldownHours;
-      session.maxServersPerUser = maxServersPerUser;
+      session.maxServersPerUser = parsedMax;
       session.step = 10;
       session.lastApiTest = null;
       return interaction.reply({ ...setupPayload(session), flags: MessageFlags.Ephemeral });
