@@ -142,7 +142,7 @@ function formatDuration(ms) {
   if (!Number.isFinite(ms) || ms <= 0) return '0m';
   const h = Math.floor(ms / MS_PER_HOUR);
   const m = Math.floor((ms % MS_PER_HOUR) / 60_000);
-  if (h > 0) return `${h}h ${m}m`;
+  if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`;
   return `${m}m`;
 }
 
@@ -1078,6 +1078,8 @@ export async function handleServerInteraction(interaction, parts) {
           updatedBy: userId,
         };
         ServerProvision.updateGuild(guildId, { createdServerRecords: data.createdServerRecords });
+      } else {
+        logger.warn(`Panel ${op} succeeded but local server record was not found for user ${targetUserId} and server ${serverId}.`);
       }
 
       await sendAdminLog(interaction.guild, {
