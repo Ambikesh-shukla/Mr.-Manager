@@ -55,6 +55,7 @@ export default {
             name: '🌐 Public Commands *(Everyone)*',
             value: [
               '`/review submit` — Submit a review/vouch',
+              '`/bingo` — Interactive bingo (bot or player challenge)',
               '`/afk set/remove/status` — AFK status with auto-reply on mention',
               '`/serverinfo` — Server statistics',
               '`/ping` — Bot latency check',
