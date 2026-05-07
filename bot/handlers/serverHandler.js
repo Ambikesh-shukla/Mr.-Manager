@@ -9,7 +9,7 @@ import {
   TextInputBuilder,
   TextInputStyle,
 } from 'discord.js';
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'crypto';
 import { ServerProvision } from '../storage/ServerProvision.js';
 import { embed, Colors, errorEmbed } from '../utils/embeds.js';
 import { isAdmin } from '../utils/permissions.js';
@@ -19,6 +19,7 @@ import { logger } from '../utils/logger.js';
 const setupSessions = new Map();
 const pendingProvisionClaims = new Set();
 const API_TEST_TIMEOUT_MS = 10_000;
+const MS_PER_HOUR = 3_600_000;
 const MIN_API_TOKEN_LENGTH = 8;
 const TOTAL_SETUP_STEPS = 11;
 
@@ -140,8 +141,8 @@ function claimLockKey(guildId, userId) {
 
 function formatDuration(ms) {
   if (!Number.isFinite(ms) || ms <= 0) return '0m';
-  const h = Math.floor(ms / 3_600_000);
-  const m = Math.floor((ms % 3_600_000) / 60_000);
+  const h = Math.floor(ms / MS_PER_HOUR);
+  const m = Math.floor((ms % MS_PER_HOUR) / 60_000);
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
 }
@@ -659,7 +660,7 @@ export async function handleServerInteraction(interaction, parts) {
         const claim = ServerProvision.ensureUserClaim(guildId, userId);
         const servers = ServerProvision.ensureUserServers(guildId, userId);
         const cooldowns = ServerProvision.ensureUserCooldowns(guildId, userId);
-        const idempotencyKey = `${guildId}:${userId}:${Date.now()}`;
+        const idempotencyKey = `${guildId}:${userId}:${randomUUID()}`;
         const endpoint = getPanelApiEndpoint(panelSetup, 'create');
         if (!endpoint) {
           return interaction.followUp({
@@ -700,7 +701,7 @@ export async function handleServerInteraction(interaction, parts) {
         claim.lastClaimAt = createdAtIso;
         claim.lastInviteSnapshot = inviteCount;
         if (eligibility.cooldownHours > 0) {
-          cooldowns.nextClaimAt = Date.now() + (eligibility.cooldownHours * 3_600_000);
+          cooldowns.nextClaimAt = Date.now() + (eligibility.cooldownHours * MS_PER_HOUR);
         } else {
           delete cooldowns.nextClaimAt;
         }
@@ -726,7 +727,9 @@ export async function handleServerInteraction(interaction, parts) {
         await interaction.followUp({ embeds: [detailEmbed], flags: MessageFlags.Ephemeral });
         try {
           await interaction.user.send({ embeds: [detailEmbed] });
-        } catch {}
+        } catch (err) {
+          logger.warn(`Could not DM server details to ${interaction.user.tag}: ${err?.message ?? 'unknown error'}`);
+        }
 
         await sendAdminLog(interaction.guild, {
           embeds: [embed({
@@ -995,7 +998,7 @@ export async function handleServerInteraction(interaction, parts) {
       const panelSetup = data.panelSetup;
       const targetUserId = interaction.fields.getTextInputValue('userid').trim();
 
-      if (!/^\d{5,30}$/.test(targetUserId)) {
+      if (!/^\d{17,20}$/.test(targetUserId)) {
         return interaction.reply({ embeds: [errorEmbed('Invalid Discord user ID.')], flags: MessageFlags.Ephemeral });
       }
 
