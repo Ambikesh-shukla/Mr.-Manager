@@ -1,4 +1,4 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
 import { ServerProvision } from '../storage/ServerProvision.js';
 import { embed, Colors, errorEmbed } from '../utils/embeds.js';
 import { isAdmin } from '../utils/permissions.js';
@@ -46,7 +46,6 @@ function buildDashboard(guildId, userId, isUserAdmin) {
       color: Colors.primary,
       description: 'Choose an option below to manage base server provisioning.',
       fields: [
-        { name: 'Guild ID', value: guildId, inline: false },
         { name: 'Panel Config', value: data.panelConfigRef ? `Configured (\`${data.panelConfigRef}\`)` : 'Not configured', inline: true },
         { name: 'Invite Requirement', value: String(data.inviteRequirement ?? 0), inline: true },
         { name: 'My Claims', value: userClaim ? `Used: ${userClaim.claimCount ?? 0}` : 'None yet', inline: true },
@@ -61,7 +60,7 @@ export async function showServerDashboard(interaction) {
   const isUserAdmin = isAdmin(interaction.member);
   const payload = buildDashboard(interaction.guildId, interaction.user.id, isUserAdmin);
   if (interaction.replied || interaction.deferred) return interaction.editReply(payload);
-  return interaction.reply({ ...payload, flags: 64 });
+  return interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
 }
 
 export async function handleServerInteraction(interaction, parts) {
@@ -83,7 +82,7 @@ export async function handleServerInteraction(interaction, parts) {
 
   if (action === 'setup' || action === 'admin') {
     if (!admin) {
-      return interaction.reply({ embeds: [errorEmbed('You need **Administrator** permission for this control.')], flags: 64 });
+      return interaction.reply({ embeds: [errorEmbed('You need **Administrator** permission for this control.')], flags: MessageFlags.Ephemeral });
     }
     await interaction.deferUpdate();
     return interaction.followUp({
@@ -92,7 +91,7 @@ export async function handleServerInteraction(interaction, parts) {
         description: 'Base structure is ready. Configuration actions will be added in the next phase.',
         color: Colors.info,
       })],
-      flags: 64,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -107,7 +106,7 @@ export async function handleServerInteraction(interaction, parts) {
         description: 'Base flow initialized. API provisioning is intentionally disabled in this phase.',
         color: Colors.success,
       })],
-      flags: 64,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -120,7 +119,7 @@ export async function handleServerInteraction(interaction, parts) {
         description: 'Reward claim scaffolding is ready. Invite reward validation will be added later.',
         color: Colors.info,
       })],
-      flags: 64,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -134,7 +133,7 @@ export async function handleServerInteraction(interaction, parts) {
         description: `You currently have **${servers.length}** recorded server(s).`,
         color: Colors.info,
       })],
-      flags: 64,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
