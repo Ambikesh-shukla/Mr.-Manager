@@ -191,7 +191,7 @@ function buildGameComponents(game) {
   const pickRow = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId(`bingo:mark_select:${game.id}`)
-      .setPlaceholder(`Choose a number (${options.length} left)`)
+      .setPlaceholder(`Choose a number (${options.length} remaining)`)
       .setMinValues(1)
       .setMaxValues(1)
       .addOptions(options),
@@ -460,7 +460,7 @@ export async function handleBingoButton(interaction, parts) {
       return;
     }
 
-    if (!ensureUserFree(game.challengerId) && userToGame.get(game.challengerId) !== game.id) {
+    if (ensureUserFree(game.challengerId) || userToGame.get(game.challengerId) !== game.id) {
       await interaction.update({
         embeds: [embed({ title: '⚠️ Challenge expired', description: 'Challenger is now busy in another game.', color: Colors.warning, timestamp: false })],
         components: [],
