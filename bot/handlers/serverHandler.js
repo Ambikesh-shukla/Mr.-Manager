@@ -8,13 +8,17 @@ import {
   TextInputBuilder,
   TextInputStyle,
 } from 'discord.js';
-import { createCipheriv, createHash, randomBytes } from 'crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'crypto';
 import { ServerProvision } from '../storage/ServerProvision.js';
 import { embed, Colors, errorEmbed } from '../utils/embeds.js';
 import { isAdmin } from '../utils/permissions.js';
+import { GuildConfig } from '../storage/GuildConfig.js';
+import { logger } from '../utils/logger.js';
 
 const setupSessions = new Map();
+const pendingProvisionClaims = new Set();
 const API_TEST_TIMEOUT_MS = 10_000;
+const MS_PER_HOUR = 3_600_000;
 const MIN_API_TOKEN_LENGTH = 8;
 const TOTAL_SETUP_STEPS = 11;
 
@@ -104,6 +108,210 @@ function encryptApiKey(apiKey) {
     iv: iv.toString('base64'),
     tag: tag.toString('base64'),
   };
+}
+
+function decryptApiKey(panelSetup) {
+  const key = getSecretKey();
+  if (!key || !panelSetup?.apiKeyEncrypted || !panelSetup?.apiKeyIv || !panelSetup?.apiKeyTag) return null;
+  try {
+    const decipher = createDecipheriv(
+      'aes-256-gcm',
+      key,
+      Buffer.from(panelSetup.apiKeyIv, 'base64'),
+    );
+    decipher.setAuthTag(Buffer.from(panelSetup.apiKeyTag, 'base64'));
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(panelSetup.apiKeyEncrypted, 'base64')),
+      decipher.final(),
+    ]);
+    return decrypted.toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
+function normalizeBaseUrl(baseUrl) {
+  return String(baseUrl || '').replace(/\/+$/, '');
+}
+
+function claimLockKey(guildId, userId) {
+  return `${guildId}:${userId}`;
+}
+
+function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return '0m';
+  const h = Math.floor(ms / MS_PER_HOUR);
+  const m = Math.floor((ms % MS_PER_HOUR) / 60_000);
+  if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  return `${m}m`;
+}
+
+function renderServerName(format, user) {
+  return (format || '{username}-minecraft')
+    .replaceAll('{username}', user.username)
+    .replaceAll('{userid}', user.id)
+    .slice(0, 64);
+}
+
+function getUserInviteCount(invites, userId) {
+  let total = 0;
+  for (const inv of invites.values()) {
+    if (inv.inviter?.id !== userId) continue;
+    if (!Number.isFinite(inv.uses)) continue;
+    total += inv.uses;
+  }
+  return total;
+}
+
+async function fetchInviteCountForMember(guild, userId) {
+  try {
+    const invites = await guild.invites.fetch();
+    return getUserInviteCount(invites, userId);
+  } catch {
+    return 0;
+  }
+}
+
+function getEligibilityState(data, panelSetup, userId, inviteCount) {
+  const requirement = Math.max(0, Number(panelSetup?.inviteRequirement ?? data.inviteRequirement ?? 0) || 0);
+  const maxServersPerUser = Math.max(1, Number(panelSetup?.maxServersPerUser) || 1);
+  const cooldownHours = Math.max(0, Number(panelSetup?.cooldownHours ?? 0) || 0);
+  const servers = Array.isArray(data.createdServerRecords?.[userId]) ? data.createdServerRecords[userId] : [];
+  const cooldownRef = data.cooldowns?.[userId] ?? {};
+  const nextClaimAt = Number(cooldownRef.nextClaimAt) || 0;
+  const now = Date.now();
+
+  if (inviteCount < requirement) {
+    return { ok: false, reason: `You need **${requirement}** invites to claim this reward. You currently have **${inviteCount}**.` };
+  }
+  if (servers.length >= maxServersPerUser) {
+    return { ok: false, reason: `You have reached the max limit (**${maxServersPerUser}**) of reward servers.` };
+  }
+  if (nextClaimAt > now) {
+    return { ok: false, reason: `You are on cooldown. Try again in **${formatDuration(nextClaimAt - now)}**.` };
+  }
+  return { ok: true, requirement, maxServersPerUser, cooldownHours };
+}
+
+function getPanelApiEndpoint(panelSetup, kind, serverId = null) {
+  const base = normalizeBaseUrl(panelSetup?.baseUrl);
+  if (!base) return null;
+  if (kind === 'create') {
+    if (panelSetup.provider === 'custom') return `${base}/servers`;
+    return `${base}/api/application/servers`;
+  }
+  if (!serverId) return null;
+  if (kind === 'suspend') {
+    if (panelSetup.provider === 'custom') return `${base}/servers/${serverId}/suspend`;
+    return `${base}/api/application/servers/${serverId}/suspend`;
+  }
+  if (kind === 'delete') {
+    if (panelSetup.provider === 'custom') return `${base}/servers/${serverId}`;
+    return `${base}/api/application/servers/${serverId}/force`;
+  }
+  if (kind === 'test') {
+    if (panelSetup.provider === 'custom') return `${base}/health`;
+    return `${base}/api/application/nodes`;
+  }
+  return null;
+}
+
+function buildProvisionPayload(panelSetup, user, idempotencyKey, inviteCount) {
+  const serverName = renderServerName(panelSetup.serverNameFormat, user);
+  return {
+    external_id: idempotencyKey,
+    name: serverName,
+    owner: {
+      discord_user_id: user.id,
+      username: user.username,
+      tag: user.tag,
+    },
+    metadata: {
+      source: 'invite_reward',
+      invite_count: inviteCount,
+      provider: panelSetup.provider,
+      egg_template: panelSetup.eggTemplate,
+      node_location: panelSetup.nodeLocation,
+    },
+    limits: {
+      memory: panelSetup.limits?.ramMb ?? 4096,
+      cpu: panelSetup.limits?.cpuPercent ?? 100,
+      disk: panelSetup.limits?.diskMb ?? 10240,
+    },
+  };
+}
+
+function hoursToMs(hours) {
+  return Math.max(0, Number(hours) || 0) * MS_PER_HOUR;
+}
+
+async function callPanelApi(panelSetup, method, endpoint, body) {
+  const apiKey = decryptApiKey(panelSetup);
+  if (!apiKey) {
+    return { ok: false, error: 'Unable to decrypt panel API key. Re-run setup and save again.' };
+  }
+  try {
+    const response = await fetch(endpoint, {
+      method,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'User-Agent': 'Mr. Manager/ServerProvision',
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const raw = await response.text();
+    let parsed = null;
+    try {
+      parsed = raw ? JSON.parse(raw) : null;
+    } catch (err) {
+      logger.warn(`Panel API returned non-JSON response (${err?.message ?? 'parse error'})`);
+    }
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        error:
+          parsed?.errors?.[0]?.detail ||
+          parsed?.message ||
+          `Panel API responded with HTTP ${response.status}.`,
+      };
+    }
+    return { ok: true, status: response.status, data: parsed ?? raw ?? null };
+  } catch (err) {
+    logger.warn(`Panel API request failed: ${err?.message ?? 'unknown error'}`);
+    return { ok: false, error: 'Failed to reach panel API endpoint.' };
+  }
+}
+
+async function sendAdminLog(guild, payload) {
+  const cfg = GuildConfig.get(guild.id);
+  if (!cfg.logChannel) return;
+  try {
+    const logChannel = await guild.channels.fetch(cfg.logChannel);
+    if (!logChannel?.isTextBased()) return;
+    await logChannel.send(payload);
+  } catch (err) {
+    logger.warn(`Failed to post server log to admin channel: ${err?.message ?? 'unknown error'}`);
+  }
+}
+
+function summarizeCreatedServers(data) {
+  const all = Object.entries(data.createdServerRecords ?? {});
+  if (all.length === 0) return 'No servers recorded yet.';
+  const lines = [];
+  for (const [uid, records] of all) {
+    if (!Array.isArray(records) || records.length === 0) continue;
+    for (const rec of records.slice(-5)) {
+      lines.push(`<@${uid}> • \`${getRecordServerId(rec)}\` • ${rec.name ?? 'Unnamed'} • ${rec.status ?? 'active'}`);
+    }
+  }
+  return lines.length ? lines.slice(-20).join('\n') : 'No servers recorded yet.';
+}
+
+function getRecordServerId(record) {
+  return String(record?.panelServerId ?? record?.id ?? 'unknown');
 }
 
 async function testPanelApi(session) {
@@ -412,36 +620,171 @@ export async function handleServerInteraction(interaction, parts) {
       return interaction.followUp({
         embeds: [embed({
           title: '🛠️ Admin Controls',
-          description: 'Use **Setup Panel** to configure provider, limits, invite gating, and quotas.',
+          description: 'Manage reward servers and provisioning controls.',
           color: Colors.info,
+          fields: [
+            { name: 'Setup', value: 'Use **Setup Panel** from dashboard to manage invites, limits, cooldown, and API config.', inline: false },
+            { name: 'Available Actions', value: 'View servers, test API, reset claims, suspend/delete servers.', inline: false },
+          ],
         })],
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('server:btn:admin_view').setLabel('View Created Servers').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('server:btn:admin_test').setLabel('Test API').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('server:btn:admin_reset').setLabel('Reset User Claim').setStyle(ButtonStyle.Primary),
+          ),
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('server:btn:admin_suspend').setLabel('Suspend Server').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId('server:btn:admin_delete').setLabel('Delete Server').setStyle(ButtonStyle.Danger),
+          ),
+        ],
         flags: MessageFlags.Ephemeral,
       });
     }
 
     if (action === 'create') {
-      ServerProvision.ensureUserClaim(guildId, userId);
-      ServerProvision.ensureUserServers(guildId, userId);
-      ServerProvision.ensureUserCooldowns(guildId, userId);
+      const lock = claimLockKey(guildId, userId);
+      if (pendingProvisionClaims.has(lock)) {
+        return interaction.reply({
+          embeds: [errorEmbed('A provisioning request for you is already in progress. Please wait.')],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
       await interaction.deferUpdate();
-      return interaction.followUp({
-        embeds: [embed({
-          title: '🆕 Create Server',
-          description: 'Base flow initialized. API provisioning is intentionally disabled in this phase.',
+      pendingProvisionClaims.add(lock);
+      try {
+        const data = ServerProvision.ensureGuild(guildId);
+        const panelSetup = data.panelSetup;
+        if (!panelSetup) {
+          return interaction.followUp({
+            embeds: [errorEmbed('Panel setup is not configured yet. Ask an admin to run **Setup Panel** first.')],
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+
+        const inviteCount = await fetchInviteCountForMember(interaction.guild, userId);
+        const eligibility = getEligibilityState(data, panelSetup, userId, inviteCount);
+        if (!eligibility.ok) {
+          return interaction.followUp({ embeds: [errorEmbed(eligibility.reason)], flags: MessageFlags.Ephemeral });
+        }
+
+        const claim = ServerProvision.ensureUserClaim(guildId, userId);
+        const servers = ServerProvision.ensureUserServers(guildId, userId);
+        const cooldowns = ServerProvision.ensureUserCooldowns(guildId, userId);
+        const idempotencyKey = `${guildId}:${userId}:${randomUUID()}`;
+        const endpoint = getPanelApiEndpoint(panelSetup, 'create');
+        if (!endpoint) {
+          return interaction.followUp({
+            embeds: [errorEmbed('Invalid panel API base URL in setup. Re-run setup and save again.')],
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+
+        const payload = buildProvisionPayload(panelSetup, interaction.user, idempotencyKey, inviteCount);
+        const provision = await callPanelApi(panelSetup, 'POST', endpoint, payload);
+        if (!provision.ok) {
+          return interaction.followUp({
+            embeds: [errorEmbed(`Failed to create server: ${provision.error}`)],
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+
+        const createdAtIso = new Date().toISOString();
+        const panelServerId =
+          provision.data?.attributes?.id ||
+          provision.data?.id ||
+          provision.data?.server_id ||
+          idempotencyKey;
+        if (panelServerId === idempotencyKey) {
+          logger.warn('Panel API did not return a server ID; falling back to external ID key.');
+        }
+        const serverName = payload.name;
+        const record = {
+          id: idempotencyKey,
+          panelServerId: String(panelServerId),
+          name: serverName,
+          provider: panelSetup.provider,
+          status: 'active',
+          createdAt: createdAtIso,
+          inviteCountAtClaim: inviteCount,
+          createdBy: userId,
+        };
+        servers.push(record);
+        claim.claimed = true;
+        claim.claimCount = (claim.claimCount ?? 0) + 1;
+        claim.lastClaimAt = createdAtIso;
+        claim.lastInviteSnapshot = inviteCount;
+        if (eligibility.cooldownHours > 0) {
+          cooldowns.nextClaimAt = Date.now() + hoursToMs(eligibility.cooldownHours);
+        } else {
+          delete cooldowns.nextClaimAt;
+        }
+        ServerProvision.updateGuild(guildId, {
+          userClaims: data.userClaims,
+          createdServerRecords: data.createdServerRecords,
+          cooldowns: data.cooldowns,
+        });
+
+        const detailEmbed = embed({
+          title: '✅ Server Created',
           color: Colors.success,
-        })],
-        flags: MessageFlags.Ephemeral,
-      });
+          description: 'Your invite reward server has been provisioned successfully.',
+          fields: [
+            { name: 'Server Name', value: `\`${serverName}\``, inline: true },
+            { name: 'Server ID', value: `\`${record.panelServerId}\``, inline: true },
+            { name: 'Provider', value: `\`${panelSetup.providerLabel ?? panelSetup.provider}\``, inline: true },
+            { name: 'Claim Count', value: String(claim.claimCount), inline: true },
+            { name: 'Invites Used', value: String(inviteCount), inline: true },
+          ],
+        });
+
+        try {
+          await interaction.user.send({ embeds: [detailEmbed] });
+        } catch (err) {
+          logger.warn(`Could not DM server details to ${interaction.user.tag}: ${err?.message ?? 'unknown error'}`);
+        }
+        await interaction.followUp({ embeds: [detailEmbed], flags: MessageFlags.Ephemeral });
+
+        await sendAdminLog(interaction.guild, {
+          embeds: [embed({
+            title: '🆕 Reward Server Provisioned',
+            color: Colors.info,
+            fields: [
+              { name: 'User', value: `<@${userId}> (\`${userId}\`)`, inline: false },
+              { name: 'Server ID', value: `\`${record.panelServerId}\``, inline: true },
+              { name: 'Server Name', value: `\`${record.name}\``, inline: true },
+              { name: 'Provider', value: `\`${record.provider}\``, inline: true },
+              { name: 'Invites', value: String(inviteCount), inline: true },
+              { name: 'Claim Count', value: String(claim.claimCount), inline: true },
+            ],
+          })],
+        });
+        return;
+      } finally {
+        pendingProvisionClaims.delete(lock);
+      }
     }
 
     if (action === 'rewards') {
-      ServerProvision.ensureUserClaim(guildId, userId);
       await interaction.deferUpdate();
+      const data = ServerProvision.ensureGuild(guildId);
+      const panelSetup = data.panelSetup;
+      const inviteCount = await fetchInviteCountForMember(interaction.guild, userId);
+      const requirement = Math.max(0, Number(panelSetup?.inviteRequirement ?? data.inviteRequirement ?? 0) || 0);
+      const eligible = inviteCount >= requirement;
       return interaction.followUp({
         embeds: [embed({
           title: '🎁 Invite Rewards',
-          description: 'Reward claim scaffolding is ready. Invite reward validation will be added later.',
+          description: eligible
+            ? 'You are eligible to claim your reward server.'
+            : 'You are not eligible yet. Invite more users and try again.',
           color: Colors.info,
+          fields: [
+            { name: 'Your Invites', value: String(inviteCount), inline: true },
+            { name: 'Required Invites', value: String(requirement), inline: true },
+            { name: 'Eligible', value: eligible ? '✅ Yes' : '❌ No', inline: true },
+          ],
         })],
         flags: MessageFlags.Ephemeral,
       });
@@ -465,6 +808,101 @@ export async function handleServerInteraction(interaction, parts) {
       clearSession(guildId, userId);
       await interaction.deferUpdate();
       return showServerDashboard(interaction);
+    }
+
+    if (action === 'admin_view') {
+      if (!admin) {
+        return interaction.reply({ embeds: [errorEmbed('Only administrators can use this control.')], flags: MessageFlags.Ephemeral });
+      }
+      const data = ServerProvision.ensureGuild(guildId);
+      await interaction.deferUpdate();
+      return interaction.followUp({
+        embeds: [embed({
+          title: '📋 Created Reward Servers',
+          color: Colors.info,
+          description: summarizeCreatedServers(data),
+        })],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    if (action === 'admin_test') {
+      if (!admin) {
+        return interaction.reply({ embeds: [errorEmbed('Only administrators can use this control.')], flags: MessageFlags.Ephemeral });
+      }
+      const data = ServerProvision.ensureGuild(guildId);
+      const panelSetup = data.panelSetup;
+      if (!panelSetup) {
+        return interaction.reply({ embeds: [errorEmbed('Panel setup is not configured yet.')], flags: MessageFlags.Ephemeral });
+      }
+      const endpoint = getPanelApiEndpoint(panelSetup, 'test');
+      if (!endpoint) {
+        return interaction.reply({ embeds: [errorEmbed('Invalid panel API base URL in saved setup.')], flags: MessageFlags.Ephemeral });
+      }
+      await interaction.deferUpdate();
+      const testResult = await callPanelApi(panelSetup, 'GET', endpoint);
+      return interaction.followUp({
+        embeds: [embed({
+          title: '🧪 API Test Result',
+          color: testResult.ok ? Colors.success : Colors.error,
+          description: testResult.ok
+            ? `Connection successful (HTTP ${testResult.status}).`
+            : `Connection failed: ${testResult.error}`,
+        })],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    if (action === 'admin_reset') {
+      if (!admin) {
+        return interaction.reply({ embeds: [errorEmbed('Only administrators can use this control.')], flags: MessageFlags.Ephemeral });
+      }
+      const modal = new ModalBuilder()
+        .setCustomId('server:modal:admin_reset')
+        .setTitle('Reset User Claim');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('userid')
+            .setLabel('Discord User ID')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setPlaceholder('e.g. 123456789012345678')
+            .setMaxLength(30),
+        ),
+      );
+      return interaction.showModal(modal);
+    }
+
+    if (action === 'admin_suspend' || action === 'admin_delete') {
+      if (!admin) {
+        return interaction.reply({ embeds: [errorEmbed('Only administrators can use this control.')], flags: MessageFlags.Ephemeral });
+      }
+      const isSuspend = action === 'admin_suspend';
+      const modal = new ModalBuilder()
+        .setCustomId(`server:modal:${isSuspend ? 'admin_suspend' : 'admin_delete'}`)
+        .setTitle(isSuspend ? 'Suspend User Server' : 'Delete User Server');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('userid')
+            .setLabel('Discord User ID')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setPlaceholder('e.g. 123456789012345678')
+            .setMaxLength(30),
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('serverid')
+            .setLabel('Panel Server ID')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setPlaceholder('Server ID from panel')
+            .setMaxLength(100),
+        ),
+      );
+      return interaction.showModal(modal);
     }
 
     const session = getSession(guildId, userId);
@@ -565,6 +1003,109 @@ export async function handleServerInteraction(interaction, parts) {
   if (interaction.isModalSubmit()) {
     if (type !== 'modal') return;
     const field = parts[2];
+
+    if (field === 'admin_reset' || field === 'admin_suspend' || field === 'admin_delete') {
+      if (!admin) {
+        return interaction.reply({ embeds: [errorEmbed('Only administrators can use this control.')], flags: MessageFlags.Ephemeral });
+      }
+
+      const data = ServerProvision.ensureGuild(guildId);
+      const panelSetup = data.panelSetup;
+      const targetUserId = interaction.fields.getTextInputValue('userid').trim();
+
+      if (!/^\d{17,20}$/.test(targetUserId)) {
+        return interaction.reply({ embeds: [errorEmbed('Invalid Discord user ID.')], flags: MessageFlags.Ephemeral });
+      }
+
+      if (field === 'admin_reset') {
+        const claims = data.userClaims ?? {};
+        const cooldowns = data.cooldowns ?? {};
+        claims[targetUserId] = {
+          claimed: false,
+          claimCount: 0,
+          lastClaimAt: null,
+          lastInviteSnapshot: null,
+        };
+        if (cooldowns[targetUserId]) {
+          delete cooldowns[targetUserId].nextClaimAt;
+        }
+        ServerProvision.updateGuild(guildId, { userClaims: claims, cooldowns });
+        await sendAdminLog(interaction.guild, {
+          embeds: [embed({
+            title: '♻️ User Claim Reset',
+            color: Colors.warning,
+            fields: [
+              { name: 'Target User', value: `<@${targetUserId}> (\`${targetUserId}\`)`, inline: false },
+              { name: 'Reset By', value: `<@${userId}>`, inline: true },
+            ],
+          })],
+        });
+        return interaction.reply({
+          embeds: [embed({ title: '✅ Claim Reset', color: Colors.success, description: `Reset reward claim state for <@${targetUserId}>.` })],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      if (!panelSetup) {
+        return interaction.reply({ embeds: [errorEmbed('Panel setup is not configured yet.')], flags: MessageFlags.Ephemeral });
+      }
+      const serverId = interaction.fields.getTextInputValue('serverid').trim();
+      if (!serverId) {
+        return interaction.reply({ embeds: [errorEmbed('Server ID is required.')], flags: MessageFlags.Ephemeral });
+      }
+      const op = field === 'admin_suspend' ? 'suspend' : 'delete';
+      const endpoint = getPanelApiEndpoint(panelSetup, op, serverId);
+      if (!endpoint) {
+        return interaction.reply({ embeds: [errorEmbed('Invalid panel API base URL in saved setup.')], flags: MessageFlags.Ephemeral });
+      }
+
+      const method = op === 'delete' ? 'DELETE' : 'POST';
+      const apiResult = await callPanelApi(panelSetup, method, endpoint);
+      if (!apiResult.ok) {
+        return interaction.reply({
+          embeds: [errorEmbed(`Failed to ${op} server: ${apiResult.error}`)],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      const records = Array.isArray(data.createdServerRecords?.[targetUserId]) ? data.createdServerRecords[targetUserId] : [];
+      const idx = records.findIndex((r) => getRecordServerId(r) === serverId);
+      if (idx >= 0) {
+        records[idx] = {
+          ...records[idx],
+          status: op === 'delete' ? 'deleted' : 'suspended',
+          updatedAt: new Date().toISOString(),
+          updatedBy: userId,
+        };
+        ServerProvision.updateGuild(guildId, { createdServerRecords: data.createdServerRecords });
+      } else {
+        logger.warn(`Panel ${op} succeeded but local server record was not found for user ${targetUserId} and server ${serverId}.`);
+      }
+
+      await sendAdminLog(interaction.guild, {
+        embeds: [embed({
+          title: op === 'delete' ? '🗑️ Reward Server Deleted' : '⏸️ Reward Server Suspended',
+          color: Colors.warning,
+          fields: [
+            { name: 'Target User', value: `<@${targetUserId}> (\`${targetUserId}\`)`, inline: false },
+            { name: 'Server ID', value: `\`${serverId}\``, inline: true },
+            { name: 'Action By', value: `<@${userId}>`, inline: true },
+          ],
+        })],
+      });
+
+      return interaction.reply({
+        embeds: [embed({
+          title: `✅ Server ${op === 'delete' ? 'Deleted' : 'Suspended'}`,
+          color: Colors.success,
+          description: op === 'delete'
+            ? `Server \`${serverId}\` has been deleted.`
+            : `Server \`${serverId}\` has been suspended.`,
+        })],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
     const session = getSession(guildId, userId);
     if (!session) {
       return interaction.reply({ embeds: [errorEmbed('Setup session expired. Click **Setup Panel** again.')], flags: MessageFlags.Ephemeral });
