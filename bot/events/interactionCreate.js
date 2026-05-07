@@ -26,6 +26,7 @@ import { embed, Colors, successEmbed } from '../utils/embeds.js';
 import { handleWelcomeInteraction } from '../handlers/welcomeHandler.js';
 import { handleLinkInteraction } from '../handlers/linkHandler.js';
 import { handleServerInteraction } from '../handlers/serverHandler.js';
+import { handleBingoInteraction } from '../handlers/bingoHandler.js';
 
 export default {
   name: 'interactionCreate',
@@ -100,6 +101,7 @@ export default {
 
         if (ns === 'link') return handleLinkInteraction(interaction, parts);
         if (ns === 'server') return handleServerInteraction(interaction, parts);
+        if (ns === 'bingo') return handleBingoInteraction(interaction, parts);
 
         if (ns === 'panel') return handlePanelButton(interaction, id, extra ?? null);
         if (ns === 'ticketopentype') return openTicket(interaction, action, id);
@@ -236,6 +238,7 @@ export default {
         }
         if (ns === 'welcome') return handleWelcomeInteraction(interaction, parts);
         if (ns === 'server') return handleServerInteraction(interaction, parts);
+        if (ns === 'bingo') return handleBingoInteraction(interaction, parts);
         if (ns === 'panelselect') return handlePanelSelect(interaction, action);
         if (ns === 'ticketpriority_set') return handlePrioritySet(interaction, action);
         if (ns === 'noop') return interaction.deferUpdate();
