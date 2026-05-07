@@ -2,6 +2,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  MessageFlags,
   StringSelectMenuBuilder,
 } from 'discord.js';
 import { embed, Colors, errorEmbed } from '../utils/embeds.js';
@@ -153,7 +154,7 @@ function ensureParticipant(interaction, game) {
 
 export async function startBingoCommand(interaction) {
   if (!interaction.inGuild()) {
-    return interaction.reply({ embeds: [errorEmbed('Bingo can only be used in a server.')], flags: 64 });
+    return interaction.reply({ embeds: [errorEmbed('Bingo can only be used in a server.')], flags: MessageFlags.Ephemeral });
   }
 
   const gameId = makeGameId();
@@ -197,7 +198,7 @@ export async function handleBingoInteraction(interaction, parts) {
   if (!game) {
     if (interaction.isButton() || interaction.isStringSelectMenu()) {
       const fn = interaction.deferred || interaction.replied ? 'followUp' : 'reply';
-      return interaction[fn]({ embeds: [errorEmbed('This Bingo game is no longer active.')], flags: 64 });
+      return interaction[fn]({ embeds: [errorEmbed('This Bingo game is no longer active.')], flags: MessageFlags.Ephemeral });
     }
     return;
   }
@@ -205,7 +206,7 @@ export async function handleBingoInteraction(interaction, parts) {
   if (action === 'mode' && interaction.isStringSelectMenu()) {
     logger.info(`[BINGO-DEBUG] mode select | game=${game.id} user=${interaction.user.id}`);
     if (interaction.user.id !== game.hostId) {
-      return interaction.reply({ embeds: [errorEmbed('Only the player who started the game can choose mode.')], flags: 64 });
+      return interaction.reply({ embeds: [errorEmbed('Only the player who started the game can choose mode.')], flags: MessageFlags.Ephemeral });
     }
     const selected = interaction.values?.[0];
     if (selected === 'bot') {
@@ -216,7 +217,7 @@ export async function handleBingoInteraction(interaction, parts) {
 
     const targetId = game.opponentId;
     if (!targetId || targetId === interaction.client.user.id || targetId === game.hostId) {
-      return interaction.reply({ embeds: [errorEmbed('Use `/bingo opponent:@user`, then pick Challenge mode.')], flags: 64 });
+      return interaction.reply({ embeds: [errorEmbed('Use `/bingo opponent:@user`, then pick Challenge mode.')], flags: MessageFlags.Ephemeral });
     }
     game.isBot = false;
     game.status = 'pending';
@@ -241,14 +242,14 @@ export async function handleBingoInteraction(interaction, parts) {
   if (action === 'accept' && interaction.isButton()) {
     logger.info(`[BINGO-DEBUG] challenge accept | game=${game.id} user=${interaction.user.id}`);
     if (interaction.user.id !== game.opponentId) {
-      return interaction.reply({ embeds: [errorEmbed('Only the challenged player can accept.')], flags: 64 });
+      return interaction.reply({ embeds: [errorEmbed('Only the challenged player can accept.')], flags: MessageFlags.Ephemeral });
     }
     return startActiveGame(interaction, game);
   }
 
   if (action === 'decline' && interaction.isButton()) {
     if (interaction.user.id !== game.opponentId) {
-      return interaction.reply({ embeds: [errorEmbed('Only the challenged player can decline.')], flags: 64 });
+      return interaction.reply({ embeds: [errorEmbed('Only the challenged player can decline.')], flags: MessageFlags.Ephemeral });
     }
     activeBingoGames.delete(game.id);
     if (game.expireTimer) clearTimeout(game.expireTimer);
@@ -268,21 +269,21 @@ export async function handleBingoInteraction(interaction, parts) {
     logger.info(`[BINGO-DEBUG] button click | game=${game.id} user=${interaction.user.id} cell=${idx}`);
 
     if (!ensureParticipant(interaction, game)) {
-      return interaction.reply({ embeds: [errorEmbed('Only participants in this game can interact.')], flags: 64 });
+      return interaction.reply({ embeds: [errorEmbed('Only participants in this game can interact.')], flags: MessageFlags.Ephemeral });
     }
     if (game.status !== 'active') {
-      return interaction.reply({ embeds: [errorEmbed('This Bingo game is not active.')], flags: 64 });
+      return interaction.reply({ embeds: [errorEmbed('This Bingo game is not active.')], flags: MessageFlags.Ephemeral });
     }
     if (interaction.user.id !== game.turnUserId) {
-      return interaction.reply({ embeds: [errorEmbed('It is not your turn.')], flags: 64 });
+      return interaction.reply({ embeds: [errorEmbed('It is not your turn.')], flags: MessageFlags.Ephemeral });
     }
 
     const board = game.boards[interaction.user.id];
     if (!board || Number.isNaN(idx) || idx < 0 || idx > 24) {
-      return interaction.reply({ embeds: [errorEmbed('Invalid Bingo move.')], flags: 64 });
+      return interaction.reply({ embeds: [errorEmbed('Invalid Bingo move.')], flags: MessageFlags.Ephemeral });
     }
     if (board.marks[idx]) {
-      return interaction.reply({ embeds: [errorEmbed('That cell is already marked.')], flags: 64 });
+      return interaction.reply({ embeds: [errorEmbed('That cell is already marked.')], flags: MessageFlags.Ephemeral });
     }
 
     board.marks[idx] = true;
@@ -308,7 +309,7 @@ export async function handleBingoInteraction(interaction, parts) {
       if (choices.length > 0) {
         const botIdx = choices[Math.floor(Math.random() * choices.length)];
         botBoard.marks[botIdx] = true;
-        logger.info(`[BINGO-DEBUG] button click | game=${game.id} player=${game.opponentId} cell=${botIdx}`);
+        logger.info(`[BINGO-DEBUG] bot move | game=${game.id} player=${game.opponentId} cell=${botIdx}`);
         if (isWin(botBoard.marks)) {
           logger.info(`[BINGO-DEBUG] win detection | game=${game.id} winner=${game.opponentId}`);
           game.status = 'ended';
@@ -331,5 +332,5 @@ export async function handleBingoInteraction(interaction, parts) {
     });
   }
 
-  return interaction.reply({ embeds: [errorEmbed('Unknown Bingo interaction.')], flags: 64 });
+  return interaction.reply({ embeds: [errorEmbed('Unknown Bingo interaction.')], flags: MessageFlags.Ephemeral });
 }

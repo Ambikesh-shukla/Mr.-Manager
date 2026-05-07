@@ -35,8 +35,7 @@ export async function loadCommands(client) {
         const cmd = await import(`../commands/${entry}/${file}`);
         if (cmd.default?.data && cmd.default?.execute) {
           const name = cmd.default.data.name;
-          logger.info(`[COMMANDS] Loaded command "${name}" from ${filePath}`);
-          logger.info(`Loaded command: ${name}`);
+          logger.info(`[COMMANDS] Loaded command: ${name} from ${filePath}`);
 
           if (seen.has(name)) {
             duplicates.push({ name, first: seen.get(name), second: filePath });
