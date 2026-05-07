@@ -162,7 +162,7 @@ function buildGameEmbed(game, extraText = null) {
       statusText(game),
       '',
       '🟩 marked • ⬛ unmarked',
-      extraText ?? '',
+      extraText,
     ].filter(Boolean).join('\n'),
     color: Colors.primary,
     fields,
@@ -460,7 +460,8 @@ export async function handleBingoButton(interaction, parts) {
       return;
     }
 
-    if (ensureUserFree(game.challengerId) || userToGame.get(game.challengerId) !== game.id) {
+    const challengerGameId = userToGame.get(game.challengerId);
+    if (challengerGameId !== game.id) {
       await interaction.update({
         embeds: [embed({ title: '⚠️ Challenge expired', description: 'Challenger is no longer available for this challenge.', color: Colors.warning, timestamp: false })],
         components: [],
@@ -517,7 +518,7 @@ export async function handleBingoUserSelect(interaction, parts) {
     mode: 'pvp',
     status: 'pending',
     channelId: interaction.channelId,
-    messageId: '',
+    messageId: null,
     challengerId: interaction.user.id,
     opponentId: target.id,
     playerIds: [interaction.user.id, target.id],
