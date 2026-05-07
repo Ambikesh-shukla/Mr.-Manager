@@ -6,6 +6,7 @@ function defaults(guildId) {
   return {
     guildId,
     panelConfigRef: null,
+    panelSetup: null,
     inviteRequirement: 0,
     userClaims: {},
     createdServerRecords: {},
@@ -18,6 +19,7 @@ function normalizeGuildData(guildId, data = {}) {
   return {
     ...base,
     guildId,
+    panelSetup: base.panelSetup && typeof base.panelSetup === 'object' ? base.panelSetup : null,
     userClaims: typeof base.userClaims === 'object' && base.userClaims ? base.userClaims : {},
     createdServerRecords: typeof base.createdServerRecords === 'object' && base.createdServerRecords ? base.createdServerRecords : {},
     cooldowns: typeof base.cooldowns === 'object' && base.cooldowns ? base.cooldowns : {},
