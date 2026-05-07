@@ -130,7 +130,7 @@ export async function handleServerInteraction(interaction, parts) {
     await interaction.deferUpdate();
     return interaction.followUp({
       embeds: [embed({
-        title: '🖥️ My Server',
+        title: '🖥️ My Servers',
         description: `You currently have **${servers.length}** recorded server(s).`,
         color: Colors.info,
       })],
