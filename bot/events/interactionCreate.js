@@ -235,6 +235,7 @@ export default {
           return interaction.deferUpdate();
         }
         if (ns === 'welcome') return handleWelcomeInteraction(interaction, parts);
+        if (ns === 'server') return handleServerInteraction(interaction, parts);
         if (ns === 'panelselect') return handlePanelSelect(interaction, action);
         if (ns === 'ticketpriority_set') return handlePrioritySet(interaction, action);
         if (ns === 'noop') return interaction.deferUpdate();
@@ -270,6 +271,7 @@ export default {
 
         if (ns === 'setup' && action === 'modal') return handleSetupModal(interaction, parts.slice(2).join(':'));
         if (ns === 'welcome') return handleWelcomeInteraction(interaction, parts);
+        if (ns === 'server') return handleServerInteraction(interaction, parts);
         if (ns === 'ticketmodal') return handleTicketModal(interaction);
         if (ns === 'ticketclose') return handleCloseModal(interaction);
         if (ns === 'ticketadduser') return handleAddUserModal(interaction);
