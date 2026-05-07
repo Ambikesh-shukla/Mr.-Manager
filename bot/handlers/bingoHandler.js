@@ -68,7 +68,9 @@ function createBoard() {
 }
 
 function sameBoard(a, b) {
-  return a.rows.flat().every((n, i) => n === b.rows.flat()[i]);
+  const flatA = a.rows.flat();
+  const flatB = b.rows.flat();
+  return flatA.every((n, i) => n === flatB[i]);
 }
 
 function createDifferentBoards() {
@@ -220,7 +222,7 @@ function buildGameComponents(game) {
   return [pickRow, cancelRow];
 }
 
-function ensureUserFree(userId) {
+function isUserFree(userId) {
   return !userToGame.has(userId);
 }
 
@@ -370,7 +372,7 @@ export async function startBingo(interaction) {
   sharedClient = interaction.client;
   startCleanup();
 
-  if (!ensureUserFree(interaction.user.id)) {
+  if (!isUserFree(interaction.user.id)) {
     return interaction.reply({ embeds: [errorEmbed('You already have an active bingo game.')], flags: 64 });
   }
 
@@ -394,7 +396,7 @@ export async function handleBingoButton(interaction, parts) {
 
   if (action === 'mode_bot') {
     if (id !== interaction.user.id) return interaction.reply({ embeds: [errorEmbed('Only the command user can choose mode.')], flags: 64 });
-    if (!ensureUserFree(interaction.user.id)) return interaction.reply({ embeds: [errorEmbed('You already have an active bingo game.')], flags: 64 });
+    if (!isUserFree(interaction.user.id)) return interaction.reply({ embeds: [errorEmbed('You already have an active bingo game.')], flags: 64 });
 
     const game = startBotGameState(interaction.user.id, interaction.channelId, interaction.message.id);
     return interaction.update({
@@ -405,7 +407,7 @@ export async function handleBingoButton(interaction, parts) {
 
   if (action === 'mode_pvp') {
     if (id !== interaction.user.id) return interaction.reply({ embeds: [errorEmbed('Only the command user can choose mode.')], flags: 64 });
-    if (!ensureUserFree(interaction.user.id)) return interaction.reply({ embeds: [errorEmbed('You already have an active bingo game.')], flags: 64 });
+    if (!isUserFree(interaction.user.id)) return interaction.reply({ embeds: [errorEmbed('You already have an active bingo game.')], flags: 64 });
 
     return interaction.update({
       embeds: [embed({
@@ -522,8 +524,8 @@ export async function handleBingoUserSelect(interaction, parts) {
   if (target.id === interaction.user.id) return interaction.reply({ embeds: [errorEmbed('You cannot challenge yourself.')], flags: 64 });
   if (target.bot) return interaction.reply({ embeds: [errorEmbed('Use "Play vs Bot" mode to play against a bot.')], flags: 64 });
 
-  if (!ensureUserFree(interaction.user.id)) return interaction.reply({ embeds: [errorEmbed('You already have an active bingo game.')], flags: 64 });
-  if (!ensureUserFree(target.id)) return interaction.reply({ embeds: [errorEmbed('That user already has an active bingo game.')], flags: 64 });
+  if (!isUserFree(interaction.user.id)) return interaction.reply({ embeds: [errorEmbed('You already have an active bingo game.')], flags: 64 });
+  if (!isUserFree(target.id)) return interaction.reply({ embeds: [errorEmbed('That user already has an active bingo game.')], flags: 64 });
 
   const game = {
     id: randomUUID(),
