@@ -157,6 +157,8 @@ export async function startBingoCommand(interaction) {
     return interaction.reply({ embeds: [errorEmbed('Bingo can only be used in a server.')], flags: MessageFlags.Ephemeral });
   }
 
+  await interaction.deferReply({ ephemeral: false });
+
   const gameId = makeGameId();
   const opponent = interaction.options.getUser('opponent');
   const game = {
@@ -177,7 +179,7 @@ export async function startBingoCommand(interaction) {
   activeBingoGames.set(gameId, game);
   scheduleExpire(game);
 
-  const reply = await interaction.reply({
+  const reply = await interaction.editReply({
     embeds: [embed({
       title: '🎮 Bingo',
       description: 'Choose how you want to play Bingo.',
@@ -185,7 +187,6 @@ export async function startBingoCommand(interaction) {
       timestamp: false,
     })],
     components: buildModeComponents(gameId),
-    fetchReply: true,
   });
   game.messageId = reply?.id ?? null;
 }
