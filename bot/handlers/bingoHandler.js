@@ -182,6 +182,18 @@ function availableOptions(board) {
     }));
 }
 
+function finalBoardFields(game) {
+  return game.playerIds.map((id) => ({
+    name: `${mentionFor(id)} • Lines: ${completedLines(game.boards[id])}`,
+    value: `\`\`\`\n${boardText(game.boards[id])}\n\`\`\``,
+    inline: false,
+  }));
+}
+
+function nextTurnUser(game, currentUserId) {
+  return currentUserId === game.challengerId ? game.opponentId : game.challengerId;
+}
+
 function buildGameComponents(game) {
   if (game.status !== 'active') return [];
 
@@ -565,6 +577,10 @@ export async function handleBingoStringSelect(interaction, parts) {
   if (interaction.user.id !== game.turnUserId) return interaction.reply({ embeds: [errorEmbed('It is not your turn yet.')], flags: 64 });
 
   const picked = Number(interaction.values[0]);
+  if (!Number.isFinite(picked)) {
+    return interaction.reply({ embeds: [errorEmbed('Invalid number selected.')], flags: 64 });
+  }
+
   const board = game.boards[interaction.user.id];
   if (!board || !board.rows.flat().includes(picked)) {
     return interaction.reply({ embeds: [errorEmbed('That number is not on your board.')], flags: 64 });
@@ -583,18 +599,7 @@ export async function handleBingoStringSelect(interaction, parts) {
         title: '🏆 Bingo Winner',
         description: `${mentionFor(winner)} wins!`,
         color: Colors.success,
-        fields: [
-          {
-            name: `${mentionFor(game.playerIds[0])} • Lines: ${completedLines(game.boards[game.playerIds[0]])}`,
-            value: `\`\`\`\n${boardText(game.boards[game.playerIds[0]])}\n\`\`\``,
-            inline: false,
-          },
-          {
-            name: `${mentionFor(game.playerIds[1])} • Lines: ${completedLines(game.boards[game.playerIds[1]])}`,
-            value: `\`\`\`\n${boardText(game.boards[game.playerIds[1]])}\n\`\`\``,
-            inline: false,
-          },
-        ],
+        fields: finalBoardFields(game),
         timestamp: false,
       })],
       components: [],
@@ -614,18 +619,7 @@ export async function handleBingoStringSelect(interaction, parts) {
           title: '🏆 Bingo Winner',
           description: `${mentionFor(botTurn.winner)} wins!`,
           color: botTurn.winner === BOT_KEY ? Colors.error : Colors.success,
-          fields: [
-            {
-              name: `${mentionFor(game.playerIds[0])} • Lines: ${completedLines(game.boards[game.playerIds[0]])}`,
-              value: `\`\`\`\n${boardText(game.boards[game.playerIds[0]])}\n\`\`\``,
-              inline: false,
-            },
-            {
-              name: `${mentionFor(game.playerIds[1])} • Lines: ${completedLines(game.boards[game.playerIds[1]])}`,
-              value: `\`\`\`\n${boardText(game.boards[game.playerIds[1]])}\n\`\`\``,
-              inline: false,
-            },
-          ],
+          fields: finalBoardFields(game),
           timestamp: false,
         })],
         components: [],
@@ -641,7 +635,7 @@ export async function handleBingoStringSelect(interaction, parts) {
     });
   }
 
-  game.turnUserId = interaction.user.id === game.challengerId ? game.opponentId : game.challengerId;
+  game.turnUserId = nextTurnUser(game, interaction.user.id);
   touch(game);
 
   return interaction.update({
