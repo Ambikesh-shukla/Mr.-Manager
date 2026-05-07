@@ -2,7 +2,6 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  ChannelType,
   MessageFlags,
   StringSelectMenuBuilder,
   ModalBuilder,
@@ -291,7 +290,7 @@ async function sendAdminLog(guild, payload) {
   if (!cfg.logChannel) return;
   try {
     const logChannel = await guild.channels.fetch(cfg.logChannel);
-    if (!logChannel?.isTextBased() || logChannel.type === ChannelType.GuildForum) return;
+    if (!logChannel?.isTextBased()) return;
     await logChannel.send(payload);
   } catch (err) {
     logger.warn(`Failed to post server log to admin channel: ${err?.message ?? 'unknown error'}`);
@@ -305,10 +304,14 @@ function summarizeCreatedServers(data) {
   for (const [uid, records] of all) {
     if (!Array.isArray(records) || records.length === 0) continue;
     for (const rec of records.slice(-5)) {
-      lines.push(`<@${uid}> • \`${rec.panelServerId ?? rec.id ?? 'unknown'}\` • ${rec.name ?? 'Unnamed'} • ${rec.status ?? 'active'}`);
+      lines.push(`<@${uid}> • \`${getRecordServerId(rec)}\` • ${rec.name ?? 'Unnamed'} • ${rec.status ?? 'active'}`);
     }
   }
   return lines.length ? lines.slice(-20).join('\n') : 'No servers recorded yet.';
+}
+
+function getRecordServerId(record) {
+  return String(record?.panelServerId ?? record?.id ?? 'unknown');
 }
 
 async function testPanelApi(session) {
@@ -693,6 +696,9 @@ export async function handleServerInteraction(interaction, parts) {
           provision.data?.id ||
           provision.data?.server_id ||
           idempotencyKey;
+        if (panelServerId === idempotencyKey) {
+          logger.warn('Panel API did not return a server ID; falling back to external ID key.');
+        }
         const serverName = payload.name;
         const record = {
           id: idempotencyKey,
@@ -733,12 +739,12 @@ export async function handleServerInteraction(interaction, parts) {
           ],
         });
 
-        await interaction.followUp({ embeds: [detailEmbed], flags: MessageFlags.Ephemeral });
         try {
           await interaction.user.send({ embeds: [detailEmbed] });
         } catch (err) {
           logger.warn(`Could not DM server details to ${interaction.user.tag}: ${err?.message ?? 'unknown error'}`);
         }
+        await interaction.followUp({ embeds: [detailEmbed], flags: MessageFlags.Ephemeral });
 
         await sendAdminLog(interaction.guild, {
           embeds: [embed({
@@ -1063,7 +1069,7 @@ export async function handleServerInteraction(interaction, parts) {
       }
 
       const records = Array.isArray(data.createdServerRecords?.[targetUserId]) ? data.createdServerRecords[targetUserId] : [];
-      const idx = records.findIndex((r) => String(r.panelServerId ?? r.id) === serverId);
+      const idx = records.findIndex((r) => getRecordServerId(r) === serverId);
       if (idx >= 0) {
         records[idx] = {
           ...records[idx],
