@@ -1,0 +1,20 @@
+{
+  "codes": [
+    {
+      "code": "core123",
+      "plan": "core",
+      "credits": 200,
+      "maxUses": 100,
+      "expiresAt": null,
+      "active": true
+    },
+    {
+      "code": "pro123",
+      "plan": "pro",
+      "credits": -1,
+      "maxUses": 20,
+      "expiresAt": null,
+      "active": true
+    }
+  ]
+}

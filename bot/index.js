@@ -10,6 +10,7 @@ import { deployOnStartup } from './utils/deployOnStartup.js';
 import { startHeartbeat } from "../utils/heartbeat.js";
 import { startClusterSync } from "../utils/instanceRouter.js";
 import { connectMongo } from '../database/mongo.js';
+import { syncRedeemCodesFromSeed } from '../utils/redeemCodes.js';
 
 const { DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID } = process.env;
 
@@ -43,16 +44,28 @@ process.on('uncaughtException', (err) => {
 
 // ── Boot sequence ────────────────────────────────────────────────────────────
 async function boot() {
+  let mongoConnected = false;
+
   if (process.env.MONGO_URI) {
     try {
       logger.info('Connecting to MongoDB...');
       await connectMongo();
+      mongoConnected = true;
       logger.success('MongoDB connected');
     } catch (err) {
       logger.error('MongoDB connection failed. Continuing without MongoDB.', err);
     }
   } else {
     logger.warn('MONGO_URI is not set. Starting without MongoDB.');
+  }
+
+  if (mongoConnected) {
+    try {
+      logger.info('Syncing redeem codes from local seed...');
+      await syncRedeemCodesFromSeed();
+    } catch (err) {
+      logger.error('Failed to sync redeem code seed', err);
+    }
   }
 
   logger.info('Loading storage...');

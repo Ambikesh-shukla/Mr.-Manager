@@ -25,6 +25,7 @@ export const COMMAND_DEFAULTS = {
   server: 'public',
   invite: 'public',
   afk: 'public',
+  redeem: 'public',
   purge: 'admin',
 };
 
