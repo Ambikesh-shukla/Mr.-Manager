@@ -1,6 +1,8 @@
 import { logger } from './logger.js';
+import { ServerProvision } from '../storage/ServerProvision.js';
 
 const DEFAULT_LIMITS = { ramMb: 4096, cpuPercent: 100, diskMb: 10240 };
+const THREE_MONTHS_MS = 90 * 24 * 60 * 60 * 1000;
 
 function toNonNegativeInt(value, fallback = 0) {
   const n = Number.parseInt(value, 10);
@@ -105,12 +107,70 @@ export function getUserInviteCount(invites, userId) {
   return total;
 }
 
+function normalizeInviteJoinEntry(raw) {
+  const joinedAt = raw?.joinedAt ?? new Date().toISOString();
+  return {
+    inviterId: raw?.inviterId ? String(raw.inviterId) : null,
+    invitedUserId: raw?.invitedUserId ? String(raw.invitedUserId) : null,
+    inviteCode: raw?.inviteCode ? String(raw.inviteCode) : null,
+    joinedAt,
+    accountCreatedAt: raw?.accountCreatedAt ?? null,
+    isFake: raw?.isFake === true,
+    isRejoin: raw?.isRejoin === true,
+  };
+}
+
+export function isLikelyFakeInvite({ joinedAt, accountCreatedAt }) {
+  const joinedMs = Date.parse(joinedAt);
+  const createdMs = Date.parse(accountCreatedAt);
+  if (!Number.isFinite(joinedMs) || !Number.isFinite(createdMs)) return false;
+  return (joinedMs - createdMs) < THREE_MONTHS_MS;
+}
+
+export function getInviteJoinEntries(data) {
+  const entries = Array.isArray(data?.inviteJoins) ? data.inviteJoins : [];
+  return entries.map((entry) => normalizeInviteJoinEntry(entry));
+}
+
+export function recordInviteJoin(data, entry) {
+  if (!Array.isArray(data.inviteJoins)) data.inviteJoins = [];
+  const normalized = normalizeInviteJoinEntry(entry);
+  data.inviteJoins.push(normalized);
+  return normalized;
+}
+
+export function getInviteStatsForMember(data, userId) {
+  const stats = {
+    total: 0,
+    real: 0,
+    fake: 0,
+    rejoin: 0,
+  };
+
+  for (const entry of getInviteJoinEntries(data)) {
+    if (entry.inviterId !== userId) continue;
+    if (entry.isRejoin) {
+      stats.rejoin += 1;
+      continue;
+    }
+    stats.total += 1;
+    if (entry.isFake) stats.fake += 1;
+    else stats.real += 1;
+  }
+
+  return stats;
+}
+
+export function getRealInviteCountForMember(data, userId) {
+  return getInviteStatsForMember(data, userId).real;
+}
+
 export async function fetchInviteCountForMember(guild, userId) {
   try {
-    const invites = await guild.invites.fetch();
-    return getUserInviteCount(invites, userId);
+    const data = ServerProvision.ensureGuild(guild.id);
+    return getRealInviteCountForMember(data, userId);
   } catch (err) {
-    logger.warn(`Failed to fetch invites for guild ${guild?.id ?? 'unknown'} user ${userId}: ${err?.message ?? 'unknown error'}`);
+    logger.warn(`Failed to resolve stored invite count for guild ${guild?.id ?? 'unknown'} user ${userId}: ${err?.message ?? 'unknown error'}`);
     return 0;
   }
 }

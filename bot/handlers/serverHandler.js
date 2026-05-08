@@ -15,8 +15,8 @@ import { isAdmin } from '../utils/permissions.js';
 import { GuildConfig } from '../storage/GuildConfig.js';
 import { logger } from '../utils/logger.js';
 import {
-  fetchInviteCountForMember,
   getInviteRewardPlans,
+  getRealInviteCountForMember,
   getRewardEligibility,
   getRewardClaimState,
   setRewardCooldown,
@@ -627,7 +627,7 @@ async function provisionRewardClaim(interaction, { selectedRewardId, selectedNod
       });
     }
 
-    const inviteCount = await fetchInviteCountForMember(interaction.guild, userId);
+    const inviteCount = getRealInviteCountForMember(data, userId);
     const eligibility = getRewardEligibility({
       data,
       panelSetup,
@@ -1181,7 +1181,7 @@ export async function handleServerInteraction(interaction, parts) {
         });
       }
 
-      const inviteCount = await fetchInviteCountForMember(interaction.guild, userId);
+      const inviteCount = getRealInviteCountForMember(data, userId);
       const rewards = getInviteRewardPlans(data, panelSetup);
       const eligibleRewards = rewards.filter((reward) => getRewardEligibility({
         data,
@@ -1250,7 +1250,7 @@ export async function handleServerInteraction(interaction, parts) {
           flags: MessageFlags.Ephemeral,
         });
       }
-      const inviteCount = await fetchInviteCountForMember(interaction.guild, userId);
+      const inviteCount = getRealInviteCountForMember(data, userId);
       const rewards = getInviteRewardPlans(data, panelSetup);
       const preview = rewards.slice(0, 10).map((reward) => formatRewardLine(reward, inviteCount, data, panelSetup, userId)).join('\n');
       const eligible = rewards.some((reward) => getRewardEligibility({

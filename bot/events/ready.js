@@ -1,6 +1,7 @@
 import { ActivityType } from 'discord.js';
 import { logger } from '../utils/logger.js';
 import { registerCommands } from '../handlers/registerCommands.js';
+import { primeInviteSnapshotsForClient } from '../utils/inviteTracker.js';
 
 export default {
   name: 'clientReady',
@@ -16,5 +17,7 @@ export default {
     } catch (err) {
       logger.error('Failed to register slash commands on startup', err);
     }
+
+    await primeInviteSnapshotsForClient(client);
   },
 };
