@@ -101,7 +101,7 @@ export async function redeemCodeForGuild({ code, guildId, userId }) {
 
   const maxUses = Number.isFinite(existing.maxUses) ? existing.maxUses : 0;
   const usedCount = Number.isFinite(existing.usedCount) ? existing.usedCount : 0;
-  if (usedCount >= maxUses) return { ok: false, reason: 'max_uses_reached' };
+  if (maxUses > 0 && usedCount >= maxUses) return { ok: false, reason: 'max_uses_reached' };
 
   const plan = String(existing.plan ?? '').toLowerCase();
   if (!(plan in PLAN_REWARDS)) return { ok: false, reason: 'invalid_plan' };
@@ -125,12 +125,18 @@ export async function redeemCodeForGuild({ code, guildId, userId }) {
           ],
         },
         {
-          $expr: {
-            $lt: [
-              { $ifNull: ['$usedCount', 0] },
-              '$maxUses',
-            ],
-          },
+          $or: [
+            { maxUses: { $exists: false } },
+            { maxUses: { $lte: 0 } },
+            {
+              $expr: {
+                $lt: [
+                  { $ifNull: ['$usedCount', 0] },
+                  '$maxUses',
+                ],
+              },
+            },
+          ],
         },
       ],
     },
@@ -147,7 +153,7 @@ export async function redeemCodeForGuild({ code, guildId, userId }) {
   }
 
   const planExpiresAt = new Date(now.getTime() + PLAN_DURATION_MS);
-  const credits = PLAN_REWARDS[plan];
+  const credits = Number.isFinite(existing.credits) ? existing.credits : PLAN_REWARDS[plan];
   await db.collection(GUILDS_COLLECTION).updateOne(
     { guildId },
     {

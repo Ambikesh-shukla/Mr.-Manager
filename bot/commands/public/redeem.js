@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
+import { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } from 'discord.js';
 import { errorEmbed, successEmbed } from '../../utils/embeds.js';
 import { redeemCodeForGuild } from '../../../utils/redeemCodes.js';
 
@@ -12,6 +12,11 @@ function isGuildOwnerOrAdmin(interaction) {
 
 function toDateString(value) {
   return value instanceof Date ? `<t:${Math.floor(value.getTime() / 1000)}:F>` : '30 days from now';
+}
+
+function formatUsage(usedCount, maxUses) {
+  if (!Number.isFinite(maxUses) || maxUses <= 0) return `${usedCount}/∞`;
+  return `${usedCount}/${maxUses}`;
 }
 
 function reasonToMessage(reason) {
@@ -47,13 +52,13 @@ export default {
 
   async execute(interaction) {
     if (!interaction.inGuild()) {
-      return interaction.reply({ embeds: [errorEmbed('This command can only be used in a server.')], flags: 64 });
+      return interaction.reply({ embeds: [errorEmbed('This command can only be used in a server.')], flags: MessageFlags.Ephemeral });
     }
 
     if (!isGuildOwnerOrAdmin(interaction)) {
       return interaction.reply({
         embeds: [errorEmbed('Only the **server owner** or a user with **Administrator** can redeem codes.')],
-        flags: 64,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -65,7 +70,7 @@ export default {
     });
 
     if (!result.ok) {
-      return interaction.reply({ embeds: [errorEmbed(reasonToMessage(result.reason))], flags: 64 });
+      return interaction.reply({ embeds: [errorEmbed(reasonToMessage(result.reason))], flags: MessageFlags.Ephemeral });
     }
 
     const creditsLabel = result.credits === -1 ? 'Unlimited' : String(result.credits);
@@ -73,10 +78,10 @@ export default {
       embeds: [
         successEmbed(
           'Code Redeemed',
-          `Code: \`${result.code}\`\nPlan: **${result.plan.toUpperCase()}**\nCredits: **${creditsLabel}**\nExpires: ${toDateString(result.planExpiresAt)}\nUsage: **${result.usedCount}/${result.maxUses}**`,
+          `Code: \`${result.code}\`\nPlan: **${result.plan.toUpperCase()}**\nCredits: **${creditsLabel}**\nExpires: ${toDateString(result.planExpiresAt)}\nUsage: **${formatUsage(result.usedCount, result.maxUses)}**`,
         ),
       ],
-      flags: 64,
+      flags: MessageFlags.Ephemeral,
     });
   },
 };
