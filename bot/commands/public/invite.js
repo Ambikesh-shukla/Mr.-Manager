@@ -9,16 +9,17 @@ import {
   getRewardClaimState,
 } from '../../utils/inviteRewards.js';
 
-function formatRewardStatusLine({ reward, eligibility }) {
-  const remaining = Math.max(0, reward.invitesRequired - eligibility.inviteCount);
+function formatRewardStatusLine({ reward, eligibility, inviteCount }) {
+  const remaining = Math.max(0, reward.invitesRequired - inviteCount);
   const remainingText = remaining > 0 ? ` • need ${remaining} more` : '';
   const status = eligibility.ok ? '✅' : '❌';
   return `${status} **${reward.name}** (\`${reward.id}\`) — ${reward.invitesRequired} invites • ${reward.limits.ramMb}MB RAM / ${reward.limits.cpuPercent}% CPU / ${reward.limits.diskMb}MB Disk • ${eligibility.rewardClaim.claimCount}/${reward.maxClaims} claims${remainingText}`;
 }
 
 function rewardFromOptions(interaction) {
+  const customId = interaction.options.getString('reward_id')?.trim();
   return {
-    id: randomUUID(),
+    id: customId ? customId.slice(0, 80) : randomUUID(),
     name: interaction.options.getString('name') ?? `${interaction.options.getInteger('invites')} Invites Reward`,
     invitesRequired: interaction.options.getInteger('invites'),
     limits: {
@@ -55,6 +56,7 @@ export default {
       .addIntegerOption((opt) => opt.setName('disk').setDescription('Disk in MB').setRequired(true).setMinValue(1))
       .addIntegerOption((opt) => opt.setName('max_claims').setDescription('Max claims per user for this plan').setRequired(true).setMinValue(1))
       .addIntegerOption((opt) => opt.setName('cooldown').setDescription('Cooldown (hours) between claims').setRequired(true).setMinValue(0))
+      .addStringOption((opt) => opt.setName('reward_id').setDescription('Optional reward ID (slug-like)').setRequired(false))
       .addStringOption((opt) => opt.setName('name').setDescription('Reward plan name').setRequired(false))
       .addStringOption((opt) => opt.setName('node').setDescription('Node/location override').setRequired(false))
       .addStringOption((opt) => opt.setName('egg').setDescription('Egg/template override').setRequired(false)))
@@ -78,6 +80,12 @@ export default {
     if (sub === 'add') {
       const reward = rewardFromOptions(interaction);
       const rewards = Array.isArray(data.inviteRewards) ? data.inviteRewards : [];
+      if (rewards.some((existing) => existing.id === reward.id)) {
+        return interaction.reply({
+          embeds: [errorEmbed(`A reward with ID \`${reward.id}\` already exists. Use a different \`reward_id\`.`)],
+          flags: 64,
+        });
+      }
       rewards.push(reward);
       ServerProvision.updateGuild(guildId, { inviteRewards: rewards });
       return interaction.reply({
@@ -114,7 +122,8 @@ export default {
       });
       return formatRewardStatusLine({
         reward,
-        eligibility: { ...eligibility, inviteCount },
+        eligibility,
+        inviteCount,
       });
     });
 
@@ -155,4 +164,3 @@ export default {
     });
   },
 };
-

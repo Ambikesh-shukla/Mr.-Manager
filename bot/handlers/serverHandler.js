@@ -172,9 +172,10 @@ function renderServerName(format, user) {
 }
 
 function formatRewardLine(reward, inviteCount, data, panelSetup, userId) {
-  const eligibility = getRewardEligibility({ data, panelSetup, userId, inviteCount, reward });
-  const cooldownText = eligibility.nextClaimAt > Date.now()
-    ? ` • cooldown: ${formatDuration(eligibility.nextClaimAt - Date.now())}`
+  const now = Date.now();
+  const eligibility = getRewardEligibility({ data, panelSetup, userId, inviteCount, reward, now });
+  const cooldownText = eligibility.nextClaimAt > now
+    ? ` • cooldown: ${formatDuration(eligibility.nextClaimAt - now)}`
     : '';
   const remaining = eligibility.remainingInvites > 0 ? ` • need ${eligibility.remainingInvites} more invites` : '';
   const status = eligibility.ok ? '✅ Eligible' : '❌ Not eligible';
@@ -991,7 +992,7 @@ export async function handleServerInteraction(interaction, parts) {
         const servers = ServerProvision.ensureUserServers(guildId, userId);
         const cooldowns = ServerProvision.ensureUserCooldowns(guildId, userId);
         const history = ServerProvision.ensureClaimHistory(guildId);
-        const idempotencyKey = `${guildId}:${userId}:${rewardPlan.id}:${randomUUID()}`;
+        const idempotencyKey = `${guildId}:${userId}:${randomUUID()}`;
         const endpoint = getPanelApiEndpoint(panelSetup, 'create');
         if (!endpoint) {
           return interaction.followUp({

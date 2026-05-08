@@ -1,20 +1,21 @@
 const DEFAULT_LIMITS = { ramMb: 4096, cpuPercent: 100, diskMb: 10240 };
 
 function toNonNegativeInt(value, fallback = 0) {
-  const n = Number.parseInt(String(value ?? ''), 10);
+  const n = Number.parseInt(value, 10);
   if (Number.isNaN(n)) return fallback;
   return Math.max(0, n);
 }
 
 function toMinInt(value, min, fallback) {
-  const n = Number.parseInt(String(value ?? ''), 10);
+  const n = Number.parseInt(value, 10);
   if (Number.isNaN(n)) return fallback;
   return Math.max(min, n);
 }
 
 function rewardIdFromData(value) {
   const id = String(value ?? '').trim().slice(0, 80);
-  return id || null;
+  if (!id) return null;
+  return id;
 }
 
 function normalizeLimits(raw, fallback = DEFAULT_LIMITS) {
@@ -192,4 +193,3 @@ export function getRewardEligibility({ data, panelSetup, userId, inviteCount, re
     cooldownHours: reward.cooldownHours,
   };
 }
-
