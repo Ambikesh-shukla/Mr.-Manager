@@ -9,6 +9,7 @@ import { logger } from './utils/logger.js';
 import { deployOnStartup } from './utils/deployOnStartup.js';
 import { startHeartbeat } from "../utils/heartbeat.js";
 import { startClusterSync } from "../utils/instanceRouter.js";
+import { connectMongo } from '../database/mongo.js';
 
 const { DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID } = process.env;
 
@@ -42,6 +43,14 @@ process.on('uncaughtException', (err) => {
 
 // ── Boot sequence ────────────────────────────────────────────────────────────
 async function boot() {
+  if (process.env.MONGO_URI) {
+    logger.info('Connecting to MongoDB...');
+    await connectMongo();
+    logger.success('MongoDB connected');
+  } else {
+    logger.warn('MONGO_URI is not set. Starting without MongoDB.');
+  }
+
   logger.info('Loading storage...');
   await loadAll();
 
