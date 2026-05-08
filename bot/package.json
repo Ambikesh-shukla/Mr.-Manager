@@ -15,6 +15,7 @@
     "fix-dupes": "node scripts/fix_duplicate_slash_cmds.js"
   },
   "dependencies": {
+    "@upstash/redis": "^1.35.3",
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.5"
   }
