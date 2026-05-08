@@ -44,9 +44,13 @@ process.on('uncaughtException', (err) => {
 // ── Boot sequence ────────────────────────────────────────────────────────────
 async function boot() {
   if (process.env.MONGO_URI) {
-    logger.info('Connecting to MongoDB...');
-    await connectMongo();
-    logger.success('MongoDB connected');
+    try {
+      logger.info('Connecting to MongoDB...');
+      await connectMongo();
+      logger.success('MongoDB connected');
+    } catch (err) {
+      logger.error('MongoDB connection failed. Continuing without MongoDB.', err);
+    }
   } else {
     logger.warn('MONGO_URI is not set. Starting without MongoDB.');
   }

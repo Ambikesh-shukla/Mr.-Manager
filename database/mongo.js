@@ -21,15 +21,20 @@ export async function connectMongo() {
   if (!connectPromise) {
     connectPromise = (async () => {
       const { MongoClient } = await import('mongodb');
-      mongoClient = new MongoClient(uri, {
+      const client = new MongoClient(uri, {
         minPoolSize: 0,
         maxPoolSize: 10,
       });
-      await mongoClient.connect();
-      mongoDb = mongoClient.db();
+      await client.connect();
+      mongoClient = client;
+      const dbName = process.env.MONGO_DB_NAME;
+      mongoDb = dbName ? mongoClient.db(dbName) : mongoClient.db();
       await createIndexes(mongoDb);
       return mongoDb;
-    })().catch((error) => {
+    })().catch(async (error) => {
+      try {
+        await mongoClient?.close();
+      } catch {}
       connectPromise = null;
       mongoClient = undefined;
       mongoDb = undefined;
