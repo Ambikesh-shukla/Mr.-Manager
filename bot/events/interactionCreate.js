@@ -1,4 +1,5 @@
 import { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { shouldHandleInteraction } from "../../utils/instanceRouter.js";
 import { logger } from '../utils/logger.js';
 import { errorEmbed } from '../utils/embeds.js';
 import { checkPermission, COMMAND_DEFAULTS } from '../utils/permissions.js';
@@ -33,6 +34,12 @@ export default {
   once: false,
   async execute(interaction, client) {
     try {
+      const canHandle = await shouldHandleInteraction(interaction);
+
+      if (!canHandle) {
+        return;
+      }
+      
       // ── Slash Commands ─────────────────────────────────────────────────────
       if (interaction.isChatInputCommand()) {
         const cmd = client.commands.get(interaction.commandName);
