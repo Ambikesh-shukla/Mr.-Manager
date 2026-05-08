@@ -13,7 +13,8 @@ function formatRewardStatusLine({ reward, eligibility, inviteCount }) {
   const remaining = Math.max(0, reward.invitesRequired - inviteCount);
   const remainingText = remaining > 0 ? ` • need ${remaining} more` : '';
   const status = eligibility.ok ? '✅' : '❌';
-  return `${status} **${reward.name}** (\`${reward.id}\`) — ${reward.invitesRequired} invites • ${reward.limits.ramMb}MB RAM / ${reward.limits.cpuPercent}% CPU / ${reward.limits.diskMb}MB Disk • ${eligibility.rewardClaim.claimCount}/${reward.maxClaims} claims${remainingText}`;
+  const nodeText = reward.nodeId ? ` • node \`${reward.nodeId}\`` : '';
+  return `${status} **${reward.name}** (\`${reward.id}\`) — ${reward.invitesRequired} invites • ${reward.limits.ramMb}MB RAM / ${reward.limits.cpuPercent}% CPU / ${reward.limits.diskMb}MB Disk${nodeText} • ${eligibility.rewardClaim.claimCount}/${reward.maxClaims} claims${remainingText}`;
 }
 
 function rewardFromOptions(interaction) {
@@ -27,7 +28,8 @@ function rewardFromOptions(interaction) {
       cpuPercent: interaction.options.getInteger('cpu'),
       diskMb: interaction.options.getInteger('disk'),
     },
-    nodeLocation: interaction.options.getString('node') ?? '',
+    nodeId: interaction.options.getString('node') ?? '',
+    nodeLocation: '',
     eggTemplate: interaction.options.getString('egg') ?? '',
     maxClaims: interaction.options.getInteger('max_claims'),
     cooldownHours: interaction.options.getInteger('cooldown'),
@@ -58,7 +60,7 @@ export default {
       .addIntegerOption((opt) => opt.setName('cooldown').setDescription('Cooldown (hours) between claims').setRequired(true).setMinValue(0))
       .addStringOption((opt) => opt.setName('reward_id').setDescription('Optional reward ID (slug-like)').setRequired(false))
       .addStringOption((opt) => opt.setName('name').setDescription('Reward plan name').setRequired(false))
-      .addStringOption((opt) => opt.setName('node').setDescription('Node/location override').setRequired(false))
+      .addStringOption((opt) => opt.setName('node').setDescription('Configured node ID override').setRequired(false))
       .addStringOption((opt) => opt.setName('egg').setDescription('Egg/template override').setRequired(false)))
     .addSubcommand((sub) => sub
       .setName('delete')

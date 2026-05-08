@@ -43,6 +43,7 @@ function normalizeReward(raw, fallback = {}) {
     name: name || `${invitesRequired} Invites Reward`,
     invitesRequired,
     limits,
+    nodeId: String(raw?.nodeId ?? fallback.nodeId ?? '').trim().slice(0, 80),
     nodeLocation: String(raw?.nodeLocation ?? fallback.nodeLocation ?? '').trim().slice(0, 80),
     eggTemplate: String(raw?.eggTemplate ?? fallback.eggTemplate ?? '').trim().slice(0, 80),
     maxClaims,
@@ -62,6 +63,7 @@ export function getLegacyRewardPlan(data, panelSetup) {
       name: `${invitesRequired} Invites Reward`,
       invitesRequired,
       limits,
+      nodeId: panelSetup?.defaultNodeId ?? '',
       nodeLocation: panelSetup?.nodeLocation ?? '',
       eggTemplate: panelSetup?.eggTemplate ?? '',
       maxClaims: 1,
@@ -82,6 +84,7 @@ export function getInviteRewardPlans(data, panelSetup) {
   for (const raw of configured) {
     const reward = normalizeReward(raw, {
       limits: panelSetup?.limits ?? DEFAULT_LIMITS,
+      nodeId: panelSetup?.defaultNodeId ?? '',
       nodeLocation: panelSetup?.nodeLocation ?? '',
       eggTemplate: panelSetup?.eggTemplate ?? '',
       cooldownHours: panelSetup?.cooldownHours ?? 0,
