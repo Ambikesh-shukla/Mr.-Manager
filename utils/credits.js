@@ -4,14 +4,34 @@ const GUILDS_COLLECTION = 'guilds';
 const CREDIT_TRANSACTIONS_COLLECTION = 'credit_transactions';
 
 const DEFAULT_PLAN = 'free';
+const PRO_PLAN = 'pro';
 const DEFAULT_CREDITS = 50;
 
 function normalizeGuildId(guildId) {
   return typeof guildId === 'string' ? guildId.trim() : '';
 }
 
+function normalizeActionKey(actionKey) {
+  if (typeof actionKey !== 'string') return null;
+  const trimmed = actionKey.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizePlan(plan) {
+  if (typeof plan !== 'string') return DEFAULT_PLAN;
+  const trimmed = plan.trim();
+  return trimmed || DEFAULT_PLAN;
+}
+
 function normalizeAmount(value) {
   const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.trunc(parsed));
+}
+
+function normalizeCreditsValue(value) {
+  const parsed = Number(value);
+  if (parsed === -1) return -1;
   if (!Number.isFinite(parsed)) return 0;
   return Math.max(0, Math.trunc(parsed));
 }
@@ -92,7 +112,8 @@ async function insertCreditTransaction({
 }
 
 function isUnlimitedGuild(guild) {
-  return guild?.credits === -1 || guild?.plan === 'pro';
+  if (!guild) return false;
+  return guild.credits === -1 || guild.plan === PRO_PLAN;
 }
 
 export async function ensureGuild(guildId) {
@@ -138,7 +159,7 @@ export async function deductCredits(guildId, cost, actionKey = null, userId = nu
   }
 
   const amount = normalizeAmount(cost);
-  const normalizedActionKey = typeof actionKey === 'string' && actionKey.trim() ? actionKey.trim() : null;
+  const normalizedActionKey = normalizeActionKey(actionKey);
 
   const guilds = getDb().collection(GUILDS_COLLECTION);
 
@@ -147,12 +168,12 @@ export async function deductCredits(guildId, cost, actionKey = null, userId = nu
   }
 
   const now = new Date();
-  const updatedGuild = await guilds.findOneAndUpdate(
+  const performDeduction = (timestamp) => guilds.findOneAndUpdate(
     {
       guildId: normalizedGuildId,
       $or: [
         { credits: -1 },
-        { plan: 'pro' },
+        { plan: PRO_PLAN },
         { credits: { $gte: amount } },
       ],
     },
@@ -161,7 +182,7 @@ export async function deductCredits(guildId, cost, actionKey = null, userId = nu
         $set: {
           credits: {
             $cond: [
-              { $or: [{ $eq: ['$credits', -1] }, { $eq: ['$plan', 'pro'] }] },
+              { $or: [{ $eq: ['$credits', -1] }, { $eq: ['$plan', PRO_PLAN] }] },
               '$credits',
               { $subtract: [{ $ifNull: ['$credits', DEFAULT_CREDITS] }, amount] },
             ],
@@ -170,7 +191,7 @@ export async function deductCredits(guildId, cost, actionKey = null, userId = nu
             $add: [{ $ifNull: ['$totalUsed', 0] }, amount],
           },
           byAction: buildByActionIncrementExpression(normalizedActionKey, amount),
-          updatedAt: now,
+          updatedAt: timestamp,
         },
       },
     ],
@@ -180,12 +201,14 @@ export async function deductCredits(guildId, cost, actionKey = null, userId = nu
     },
   );
 
+  let updatedGuild = await performDeduction(now);
+  let transactionTime = now;
+
   if (!updatedGuild) {
-    const guild = await ensureGuild(normalizedGuildId);
-    if (isUnlimitedGuild(guild) || (guild.credits ?? 0) >= amount) {
-      return deductCredits(normalizedGuildId, amount, normalizedActionKey, userId);
-    }
-    return null;
+    await ensureGuild(normalizedGuildId);
+    transactionTime = new Date();
+    updatedGuild = await performDeduction(transactionTime);
+    if (!updatedGuild) return null;
   }
 
   const unlimited = isUnlimitedGuild(updatedGuild);
@@ -199,7 +222,7 @@ export async function deductCredits(guildId, cost, actionKey = null, userId = nu
     amount,
     beforeCredits,
     afterCredits: updatedGuild.credits,
-    createdAt: now,
+    createdAt: transactionTime,
   });
 
   return updatedGuild;
@@ -212,7 +235,7 @@ export async function refundCredits(guildId, cost, actionKey = null, userId = nu
   }
 
   const amount = normalizeAmount(cost);
-  const normalizedActionKey = typeof actionKey === 'string' && actionKey.trim() ? actionKey.trim() : null;
+  const normalizedActionKey = normalizeActionKey(actionKey);
 
   if (amount <= 0) {
     return ensureGuild(normalizedGuildId);
@@ -228,7 +251,7 @@ export async function refundCredits(guildId, cost, actionKey = null, userId = nu
         $set: {
           credits: {
             $cond: [
-              { $or: [{ $eq: ['$credits', -1] }, { $eq: ['$plan', 'pro'] }] },
+              { $or: [{ $eq: ['$credits', -1] }, { $eq: ['$plan', PRO_PLAN] }] },
               '$credits',
               { $add: [{ $ifNull: ['$credits', DEFAULT_CREDITS] }, amount] },
             ],
@@ -281,7 +304,7 @@ export async function addCredits(guildId, amount, reason = null) {
         $set: {
           credits: {
             $cond: [
-              { $or: [{ $eq: ['$credits', -1] }, { $eq: ['$plan', 'pro'] }] },
+              { $or: [{ $eq: ['$credits', -1] }, { $eq: ['$plan', PRO_PLAN] }] },
               '$credits',
               { $add: [{ $ifNull: ['$credits', DEFAULT_CREDITS] }, normalizedAmount] },
             ],
@@ -317,9 +340,8 @@ export async function setPlan(guildId, plan, credits, planExpiresAt = null, rede
     throw new Error('guildId is required');
   }
 
-  const normalizedPlan = typeof plan === 'string' && plan.trim() ? plan.trim() : DEFAULT_PLAN;
-  const normalizedCredits = normalizeAmount(credits);
-  const resolvedCredits = normalizedCredits === 0 && Number(credits) === -1 ? -1 : normalizedCredits;
+  const normalizedPlan = normalizePlan(plan);
+  const resolvedCredits = normalizeCreditsValue(credits);
 
   const previousGuild = await ensureGuild(normalizedGuildId);
 
