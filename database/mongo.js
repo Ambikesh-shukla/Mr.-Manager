@@ -1,3 +1,9 @@
+import { logger } from '../bot/utils/logger.js';
+
+// Singleton connection state:
+// - mongoClient stores the shared MongoClient instance
+// - mongoDb stores the selected Database instance
+// - connectPromise ensures concurrent callers reuse one in-flight connect
 let mongoClient;
 let mongoDb;
 let connectPromise;
@@ -35,7 +41,7 @@ export async function connectMongo() {
       try {
         await mongoClient?.close();
       } catch (closeErr) {
-        console.warn('Failed to close MongoDB client after error', closeErr);
+        logger.error('Failed to close MongoDB client after error', closeErr);
       }
       connectPromise = null;
       mongoClient = undefined;
@@ -48,11 +54,8 @@ export async function connectMongo() {
 }
 
 export function getDb() {
-  if (connectPromise && !mongoDb) {
-    throw new Error('MongoDB connection is in progress. Await connectMongo() before calling getDb().');
-  }
   if (!mongoDb) {
-    throw new Error('MongoDB is not connected. Call connectMongo() first.');
+    throw new Error('MongoDB is not connected yet. Await connectMongo() before calling getDb().');
   }
   return mongoDb;
 }
