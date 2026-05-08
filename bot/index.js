@@ -7,6 +7,8 @@ import { loadCommands } from './handlers/commandHandler.js';
 import { loadEvents } from './handlers/eventHandler.js';
 import { logger } from './utils/logger.js';
 import { deployOnStartup } from './utils/deployOnStartup.js';
+import { startHeartbeat } from "../utils/heartbeat.js";
+import { startClusterSync } from "../utils/instanceRouter.js";
 
 const { DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID } = process.env;
 
@@ -53,6 +55,10 @@ async function boot() {
   await loadEvents(client);
 
   logger.info('Connecting to Discord...');
+
+  startHeartbeat();
+  startClusterSync();
+  
   await client.login(DISCORD_BOT_TOKEN);
 }
 
