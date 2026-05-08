@@ -666,7 +666,7 @@ export async function handleServerInteraction(interaction, parts) {
           color: Colors.info,
           fields: [
             { name: 'Setup', value: 'Use **Setup Panel** from dashboard to manage invites, limits, cooldown, and API config.', inline: false },
-            { name: 'Available Actions', value: 'Manual provision, view servers, test API, reset claims, suspend/delete servers.', inline: false },
+            { name: 'Available Actions', value: 'Manual provision (Manual Admin Mode), view servers, test API, reset claims, suspend/delete servers.', inline: false },
           ],
         })],
         components: [
