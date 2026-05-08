@@ -9,11 +9,19 @@ let mongoDb;
 let connectPromise;
 
 async function createIndexes(db) {
-  await Promise.all([
-    db.collection('guilds').createIndex({ guildId: 1 }, { unique: true }),
-    db.collection('redeem_codes').createIndex({ code: 1 }, { unique: true }),
-    db.collection('credit_transactions').createIndex({ guildId: 1, createdAt: -1 }),
-  ]);
+  const indexes = [
+    { collection: 'guilds', keys: { guildId: 1 }, options: { unique: true } },
+    { collection: 'redeem_codes', keys: { code: 1 }, options: { unique: true } },
+    { collection: 'credit_transactions', keys: { guildId: 1, createdAt: -1 }, options: {} },
+  ];
+
+  await Promise.all(indexes.map(async ({ collection, keys, options }) => {
+    try {
+      await db.collection(collection).createIndex(keys, options);
+    } catch (error) {
+      throw new Error(`Failed to create index for ${collection}`, { cause: error });
+    }
+  }));
 }
 
 export async function connectMongo() {
@@ -38,8 +46,9 @@ export async function connectMongo() {
       await createIndexes(mongoDb);
       return mongoDb;
     })().catch(async (error) => {
+      logger.error('MongoDB connection setup failed', error);
       try {
-        await mongoClient?.close();
+        if (mongoClient) await mongoClient.close();
       } catch (closeErr) {
         logger.error('Failed to close MongoDB client after error', closeErr);
       }
