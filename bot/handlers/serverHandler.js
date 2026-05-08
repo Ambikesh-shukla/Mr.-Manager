@@ -27,7 +27,7 @@ const pendingProvisionClaims = new Set();
 const API_TEST_TIMEOUT_MS = 10_000;
 const MS_PER_HOUR = 3_600_000;
 const MIN_API_TOKEN_LENGTH = 8;
-const TOTAL_SETUP_STEPS = 11;
+const TOTAL_SETUP_STEPS = 12;
 
 const PROVIDERS = [
   { label: 'Pterodactyl', value: 'pterodactyl', description: 'Official Application API only' },
@@ -36,12 +36,29 @@ const PROVIDERS = [
   { label: 'Custom API', value: 'custom', description: 'Admin-owned official API with token' },
 ];
 
+const PROVISION_MODES = [
+  { label: 'Invite Reward Mode', value: 'invite_reward', description: 'Users can claim using invite rewards' },
+  { label: 'Manual Admin Mode', value: 'manual_admin', description: 'Only admins can provision servers manually' },
+];
+
 function setupKey(guildId, userId) {
   return `${guildId}:${userId}`;
 }
 
 function getProviderLabel(value) {
   return PROVIDERS.find((p) => p.value === value)?.label ?? 'Unknown';
+}
+
+function normalizeProvisioningMode(value) {
+  return value === 'manual_admin' ? 'manual_admin' : 'invite_reward';
+}
+
+function getProvisionMode(data, panelSetup) {
+  return normalizeProvisioningMode(panelSetup?.provisioningMode ?? data?.provisioningMode);
+}
+
+function getProvisionModeLabel(value) {
+  return PROVISION_MODES.find((mode) => mode.value === value)?.label ?? 'Invite Reward Mode';
 }
 
 function getSession(guildId, userId) {
@@ -65,6 +82,7 @@ function upsertSession(guildId, userId) {
     inviteRequirement: 0,
     cooldownHours: 24,
     maxServersPerUser: 1,
+    provisioningMode: 'invite_reward',
     lastApiTest: null,
   };
   setupSessions.set(setupKey(guildId, userId), session);
@@ -95,6 +113,10 @@ function parseNonNegativeInt(raw, fallback = 0) {
   const n = Number.parseInt(String(raw).trim(), 10);
   if (Number.isNaN(n)) return fallback;
   return Math.max(0, n);
+}
+
+function isSafeProvisionIdentifier(value) {
+  return /^[A-Za-z0-9._:-]+$/.test(value);
 }
 
 function getSecretKey() {
@@ -205,11 +227,12 @@ function getPanelApiEndpoint(panelSetup, kind, serverId = null) {
   return null;
 }
 
-function buildProvisionPayload(panelSetup, rewardPlan, user, idempotencyKey, inviteCount) {
+function buildProvisionPayload(panelSetup, rewardPlan, user, idempotencyKey, inviteCount, options = {}) {
   const serverName = renderServerName(panelSetup.serverNameFormat, user);
-  const effectiveNode = rewardPlan?.nodeLocation || panelSetup.nodeLocation;
-  const effectiveEgg = rewardPlan?.eggTemplate || panelSetup.eggTemplate;
-  const effectiveLimits = rewardPlan?.limits ?? panelSetup.limits ?? {};
+  const effectiveNode = options.nodeLocation || rewardPlan?.nodeLocation || panelSetup.nodeLocation;
+  const effectiveEgg = options.eggTemplate || rewardPlan?.eggTemplate || panelSetup.eggTemplate;
+  const effectiveLimits = options.limits ?? rewardPlan?.limits ?? panelSetup.limits ?? {};
+  const source = options.source || 'invite_reward';
   return {
     external_id: idempotencyKey,
     name: serverName,
@@ -219,12 +242,13 @@ function buildProvisionPayload(panelSetup, rewardPlan, user, idempotencyKey, inv
       tag: user.tag,
     },
     metadata: {
-      source: 'invite_reward',
+      source,
       invite_count: inviteCount,
-      reward_plan_id: rewardPlan?.id ?? 'legacy-default',
+      reward_plan_id: options.rewardPlanId ?? rewardPlan?.id ?? (source === 'manual_admin' ? 'manual-admin' : 'legacy-default'),
       provider: panelSetup.provider,
       egg_template: effectiveEgg,
       node_location: effectiveNode,
+      provisioned_by: options.provisionedBy ?? null,
     },
     limits: {
       memory: effectiveLimits.ramMb ?? 4096,
@@ -351,9 +375,9 @@ function buildSetupEmbed(session) {
     ? ''
     : '\n\n⚠️ **`SERVER_PANEL_SECRET` is not set.** Your API token will be saved without encryption. To enable AES-256-GCM encryption, add `SERVER_PANEL_SECRET` to your environment variables and re-run setup.';
 
-  if (session.step === 10) {
+  if (session.step === 11) {
     return embed({
-      title: `🧪 Step 10/${TOTAL_SETUP_STEPS} — Preview Configuration`,
+      title: `🧪 Step 11/${TOTAL_SETUP_STEPS} — Preview Configuration`,
       color: Colors.info,
       description:
         'Review settings, test API connection, then save.\n' +
@@ -369,6 +393,7 @@ function buildSetupEmbed(session) {
         { name: 'Server Name Format', value: `\`${session.serverNameFormat}\``, inline: false },
         { name: 'Invite Requirement', value: `\`${session.inviteRequirement}\``, inline: true },
         { name: 'Cooldown / Max per User', value: `\`${session.cooldownHours}h / ${session.maxServersPerUser}\``, inline: true },
+        { name: 'Provisioning Mode', value: `\`${getProvisionModeLabel(session.provisioningMode)}\``, inline: true },
         {
           name: 'API Test',
           value: session.lastApiTest ? `${session.lastApiTest.ok ? '✅' : '❌'} ${session.lastApiTest.message}` : '`Not tested yet`',
@@ -388,6 +413,7 @@ function buildSetupEmbed(session) {
     7: 'Set server name format.',
     8: 'Set invite requirement.',
     9: 'Set cooldown and max servers per user.',
+    10: 'Select provisioning mode.',
   };
 
   return embed({
@@ -420,6 +446,21 @@ function buildSetupComponents(session) {
   if (session.step === 10) {
     return [
       new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('server:menu:mode_select')
+          .setPlaceholder('Select provisioning mode')
+          .addOptions(PROVISION_MODES.map((mode) => ({ ...mode, default: mode.value === session.provisioningMode }))),
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('server:btn:wiz_back').setLabel('Back').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('server:btn:wiz_cancel').setLabel('Cancel').setStyle(ButtonStyle.Danger),
+      ),
+    ];
+  }
+
+  if (session.step === 11) {
+    return [
+      new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('server:btn:wiz_test').setLabel('Test API').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('server:btn:wiz_save').setLabel('Save Setup').setStyle(ButtonStyle.Success).setDisabled(!session.lastApiTest?.ok),
         new ButtonBuilder().setCustomId('server:btn:wiz_back').setLabel('Back').setStyle(ButtonStyle.Secondary),
@@ -439,6 +480,7 @@ function buildSetupComponents(session) {
     7: 'nameformat',
     8: 'invite',
     9: 'cooldownmax',
+    10: 'mode',
   };
 
   return [
@@ -516,6 +558,7 @@ function buildDashboard(guildId, userId, isUserAdmin) {
   const userServers = data.createdServerRecords?.[userId] ?? [];
   const userClaim = data.userClaims?.[userId] ?? null;
   const panelSetup = data.panelSetup ?? null;
+  const provisionMode = getProvisionMode(data, panelSetup);
   const rewardPlans = getInviteRewardPlans(data, panelSetup);
 
   const row1 = new ActionRowBuilder().addComponents(
@@ -531,7 +574,8 @@ function buildDashboard(guildId, userId, isUserAdmin) {
     new ButtonBuilder()
       .setCustomId('server:btn:rewards')
       .setLabel('Invite Rewards')
-      .setStyle(ButtonStyle.Secondary),
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(provisionMode === 'manual_admin'),
   );
 
   const row2 = new ActionRowBuilder().addComponents(
@@ -563,6 +607,7 @@ function buildDashboard(guildId, userId, isUserAdmin) {
             : 'Not configured',
           inline: true,
         },
+        { name: 'Provisioning Mode', value: getProvisionModeLabel(provisionMode), inline: true },
         { name: 'Reward Plans', value: String(rewardPlans.length), inline: true },
         { name: 'My Claims', value: userClaim ? `Used: ${userClaim.claimCount ?? 0}` : 'None yet', inline: true },
         { name: 'My Servers', value: String(userServers.length), inline: true },
@@ -603,6 +648,8 @@ export async function handleServerInteraction(interaction, parts) {
       }
       // SERVER_PANEL_SECRET being missing is a non-blocking warning shown inside the wizard.
       const session = upsertSession(guildId, userId);
+      const existing = ServerProvision.ensureGuild(guildId);
+      session.provisioningMode = getProvisionMode(existing, existing.panelSetup);
       session.step = 1;
       return interaction.update(setupPayload(session));
     }
@@ -619,16 +666,18 @@ export async function handleServerInteraction(interaction, parts) {
           color: Colors.info,
           fields: [
             { name: 'Setup', value: 'Use **Setup Panel** from dashboard to manage invites, limits, cooldown, and API config.', inline: false },
-            { name: 'Available Actions', value: 'View servers, test API, reset claims, suspend/delete servers.', inline: false },
+            { name: 'Available Actions', value: 'Manual provision (Manual Admin Mode), view servers, test API, reset claims, suspend/delete servers.', inline: false },
           ],
         })],
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('server:btn:admin_view').setLabel('View Created Servers').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('server:btn:admin_user_servers').setLabel('View User Servers').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('server:btn:admin_test').setLabel('Test API').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('server:btn:admin_reset').setLabel('Reset User Claim').setStyle(ButtonStyle.Primary),
           ),
           new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('server:btn:admin_manual_create').setLabel('Manual Provision').setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId('server:btn:admin_suspend').setLabel('Suspend Server').setStyle(ButtonStyle.Danger),
             new ButtonBuilder().setCustomId('server:btn:admin_delete').setLabel('Delete Server').setStyle(ButtonStyle.Danger),
           ),
@@ -644,6 +693,23 @@ export async function handleServerInteraction(interaction, parts) {
       if (!panelSetup) {
         return interaction.followUp({
           embeds: [errorEmbed('Panel setup is not configured yet. Ask an admin to run **Setup Panel** first.')],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+      const provisionMode = getProvisionMode(data, panelSetup);
+      if (provisionMode === 'manual_admin' && !admin) {
+        return interaction.followUp({
+          embeds: [errorEmbed('This guild is in **Manual Admin Mode**. Only administrators can provision servers.')],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+      if (provisionMode === 'manual_admin' && admin) {
+        return interaction.followUp({
+          embeds: [embed({
+            title: '🛠️ Manual Admin Mode Enabled',
+            description: 'Use **Admin Controls → Manual Provision** to create servers for users.',
+            color: Colors.info,
+          })],
           flags: MessageFlags.Ephemeral,
         });
       }
@@ -706,6 +772,17 @@ export async function handleServerInteraction(interaction, parts) {
       await interaction.deferUpdate();
       const data = ServerProvision.ensureGuild(guildId);
       const panelSetup = data.panelSetup;
+      const provisionMode = getProvisionMode(data, panelSetup);
+      if (provisionMode === 'manual_admin') {
+        return interaction.followUp({
+          embeds: [embed({
+            title: '🎁 Invite Rewards Disabled',
+            description: 'This guild is currently in **Manual Admin Mode**.',
+            color: Colors.warning,
+          })],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
       const inviteCount = await fetchInviteCountForMember(interaction.guild, userId);
       const rewards = getInviteRewardPlans(data, panelSetup);
       const preview = rewards.slice(0, 10).map((reward) => formatRewardLine(reward, inviteCount, data, panelSetup, userId)).join('\n');
@@ -762,7 +839,7 @@ export async function handleServerInteraction(interaction, parts) {
       await interaction.deferUpdate();
       return interaction.followUp({
         embeds: [embed({
-          title: '📋 Created Reward Servers',
+            title: '📋 Created Servers',
           color: Colors.info,
           description: summarizeCreatedServers(data),
         })],
@@ -813,6 +890,87 @@ export async function handleServerInteraction(interaction, parts) {
             .setRequired(true)
             .setPlaceholder('e.g. 123456789012345678')
             .setMaxLength(30),
+        ),
+      );
+      return interaction.showModal(modal);
+    }
+
+    if (action === 'admin_user_servers') {
+      if (!admin) {
+        return interaction.reply({ embeds: [errorEmbed('Only administrators can use this control.')], flags: MessageFlags.Ephemeral });
+      }
+      const modal = new ModalBuilder()
+        .setCustomId('server:modal:admin_user_servers')
+        .setTitle('View User Servers');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('userid')
+            .setLabel('Discord User ID')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setPlaceholder('e.g. 123456789012345678')
+            .setMaxLength(30),
+        ),
+      );
+      return interaction.showModal(modal);
+    }
+
+    if (action === 'admin_manual_create') {
+      if (!admin) {
+        return interaction.reply({ embeds: [errorEmbed('Only administrators can use this control.')], flags: MessageFlags.Ephemeral });
+      }
+      const data = ServerProvision.ensureGuild(guildId);
+      const panelSetup = data.panelSetup;
+      if (!panelSetup) {
+        return interaction.reply({ embeds: [errorEmbed('Panel setup is not configured yet.')], flags: MessageFlags.Ephemeral });
+      }
+      const mode = getProvisionMode(data, panelSetup);
+      if (mode !== 'manual_admin') {
+        return interaction.reply({
+          embeds: [errorEmbed('Manual provisioning is only available when provisioning mode is set to **Manual Admin Mode**.')],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+      const modal = new ModalBuilder()
+        .setCustomId('server:modal:admin_manual_create')
+        .setTitle('Manual Provision Server');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('userid')
+            .setLabel('Target Discord User ID')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setPlaceholder('e.g. 123456789012345678')
+            .setMaxLength(30),
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('node')
+            .setLabel('Node/Location (optional)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
+            .setPlaceholder(panelSetup.nodeLocation || 'node-1')
+            .setMaxLength(80),
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('egg')
+            .setLabel('Egg/Template (optional)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
+            .setPlaceholder(panelSetup.eggTemplate || 'minecraft-java')
+            .setMaxLength(80),
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('limits')
+            .setLabel('RAM,CPU,Disk (MB,%,MB)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setPlaceholder(`${panelSetup.limits?.ramMb ?? 4096},${panelSetup.limits?.cpuPercent ?? 100},${panelSetup.limits?.diskMb ?? 10240}`)
+            .setMaxLength(40),
         ),
       );
       return interaction.showModal(modal);
@@ -875,7 +1033,7 @@ export async function handleServerInteraction(interaction, parts) {
     }
 
     if (action === 'wiz_save') {
-      if (session.step !== 10) {
+      if (session.step !== 11) {
         return interaction.reply({ embeds: [errorEmbed('Complete all setup steps before saving.')], flags: MessageFlags.Ephemeral });
       }
       if (!session.lastApiTest?.ok) {
@@ -895,6 +1053,7 @@ export async function handleServerInteraction(interaction, parts) {
         inviteRequirement: session.inviteRequirement,
         cooldownHours: session.cooldownHours,
         maxServersPerUser: session.maxServersPerUser,
+        provisioningMode: normalizeProvisioningMode(session.provisioningMode),
         testedAt: session.lastApiTest.checkedAt,
         updatedAt: new Date().toISOString(),
         updatedBy: userId,
@@ -913,6 +1072,7 @@ export async function handleServerInteraction(interaction, parts) {
       ServerProvision.updateGuild(guildId, {
         panelConfigRef: `${session.provider}:${session.nodeLocation}`,
         inviteRequirement: session.inviteRequirement,
+        provisioningMode: normalizeProvisioningMode(session.provisioningMode),
         panelSetup: panelSetupData,
       });
 
@@ -959,6 +1119,13 @@ export async function handleServerInteraction(interaction, parts) {
         if (!panelSetup) {
           return interaction.followUp({
             embeds: [errorEmbed('Panel setup is not configured yet. Ask an admin to run **Setup Panel** first.')],
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+        const provisionMode = getProvisionMode(data, panelSetup);
+        if (provisionMode === 'manual_admin') {
+          return interaction.followUp({
+            embeds: [errorEmbed('Invite reward claiming is disabled because this guild is in **Manual Admin Mode**.')],
             flags: MessageFlags.Ephemeral,
           });
         }
@@ -1111,6 +1278,20 @@ export async function handleServerInteraction(interaction, parts) {
       }
     }
 
+    if (parts[2] === 'mode_select') {
+      const session = getSession(guildId, userId);
+      if (!session) {
+        return interaction.reply({ embeds: [errorEmbed('Setup session expired. Click **Setup Panel** again.')], flags: MessageFlags.Ephemeral });
+      }
+      if (!admin) {
+        return interaction.reply({ embeds: [errorEmbed('Only administrators can modify setup.')], flags: MessageFlags.Ephemeral });
+      }
+      session.provisioningMode = normalizeProvisioningMode(interaction.values[0]);
+      session.step = 11;
+      session.lastApiTest = null;
+      return interaction.update(setupPayload(session));
+    }
+
     if (parts[2] !== 'provider') return interaction.deferUpdate();
     if (!admin) {
       return interaction.reply({ embeds: [errorEmbed('Only administrators can modify setup.')], flags: MessageFlags.Ephemeral });
@@ -1126,7 +1307,7 @@ export async function handleServerInteraction(interaction, parts) {
     if (type !== 'modal') return;
     const field = parts[2];
 
-    if (field === 'admin_reset' || field === 'admin_suspend' || field === 'admin_delete') {
+    if (field === 'admin_reset' || field === 'admin_suspend' || field === 'admin_delete' || field === 'admin_user_servers' || field === 'admin_manual_create') {
       if (!admin) {
         return interaction.reply({ embeds: [errorEmbed('Only administrators can use this control.')], flags: MessageFlags.Ephemeral });
       }
@@ -1137,6 +1318,156 @@ export async function handleServerInteraction(interaction, parts) {
 
       if (!/^\d{17,20}$/.test(targetUserId)) {
         return interaction.reply({ embeds: [errorEmbed('Invalid Discord user ID.')], flags: MessageFlags.Ephemeral });
+      }
+
+      if (field === 'admin_user_servers') {
+        const records = Array.isArray(data.createdServerRecords?.[targetUserId]) ? data.createdServerRecords[targetUserId] : [];
+        const lines = records.length
+          ? records.slice(-20).map((rec) => `• \`${getRecordServerId(rec)}\` • ${rec.name ?? 'Unnamed'} • ${rec.status ?? 'active'}`).join('\n')
+          : 'No servers recorded for this user.';
+        return interaction.reply({
+          embeds: [embed({
+            title: '📦 User Server Records',
+            color: Colors.info,
+            fields: [
+              { name: 'User', value: `<@${targetUserId}> (\`${targetUserId}\`)`, inline: false },
+              { name: 'Server Count', value: String(records.length), inline: true },
+              { name: 'Records', value: lines, inline: false },
+            ],
+          })],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      if (field === 'admin_manual_create') {
+        if (!panelSetup) {
+          return interaction.reply({ embeds: [errorEmbed('Panel setup is not configured yet.')], flags: MessageFlags.Ephemeral });
+        }
+        const mode = getProvisionMode(data, panelSetup);
+        if (mode !== 'manual_admin') {
+          return interaction.reply({
+            embeds: [errorEmbed('Manual provisioning is only available when provisioning mode is set to **Manual Admin Mode**.')],
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+        const endpoint = getPanelApiEndpoint(panelSetup, 'create');
+        if (!endpoint) {
+          return interaction.reply({ embeds: [errorEmbed('Invalid panel API base URL in setup. Re-run setup and save again.')], flags: MessageFlags.Ephemeral });
+        }
+
+        const limitsRaw = interaction.fields.getTextInputValue('limits').trim();
+        const [ramRaw, cpuRaw, diskRaw] = limitsRaw.split(',').map((part) => part.trim());
+        const ramMb = parseNonNegativeInt(ramRaw);
+        const cpuPercent = parseNonNegativeInt(cpuRaw);
+        const diskMb = parseNonNegativeInt(diskRaw);
+        if (
+          !ramRaw || !cpuRaw || !diskRaw ||
+          !Number.isFinite(ramMb) || !Number.isFinite(cpuPercent) || !Number.isFinite(diskMb) ||
+          ramMb <= 0 || cpuPercent <= 0 || diskMb <= 0
+        ) {
+          return interaction.reply({
+            embeds: [errorEmbed('Invalid limits format. Use `RAM,CPU,Disk` with values greater than 0.')],
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+
+        const nodeLocation = interaction.fields.getTextInputValue('node').trim().slice(0, 80) || panelSetup.nodeLocation;
+        const eggTemplate = interaction.fields.getTextInputValue('egg').trim().slice(0, 80) || panelSetup.eggTemplate;
+        if (!nodeLocation || !eggTemplate) {
+          return interaction.reply({
+            embeds: [errorEmbed('Node/Location and Egg/Template are required (either set in setup or provided here).')],
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+        if (!isSafeProvisionIdentifier(nodeLocation) || !isSafeProvisionIdentifier(eggTemplate)) {
+          return interaction.reply({
+            embeds: [errorEmbed('Node/Location and Egg/Template can only contain letters, numbers, `.`, `_`, `:`, and `-`.')],
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+
+        let targetUser = null;
+        try {
+          targetUser = await interaction.client.users.fetch(targetUserId);
+        } catch {
+          return interaction.reply({ embeds: [errorEmbed('Target user could not be fetched from Discord.')], flags: MessageFlags.Ephemeral });
+        }
+
+        const idempotencyKey = `${guildId}:${targetUserId}:${randomUUID()}`;
+        const payload = buildProvisionPayload(panelSetup, null, targetUser, idempotencyKey, 0, {
+          source: 'manual_admin',
+          nodeLocation,
+          eggTemplate,
+          limits: { ramMb, cpuPercent, diskMb },
+          provisionedBy: userId,
+        });
+        const provision = await callPanelApi(panelSetup, 'POST', endpoint, payload);
+        if (!provision.ok) {
+          return interaction.reply({
+            embeds: [errorEmbed(`Failed to create server: ${provision.error}`)],
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+
+        const createdAtIso = new Date().toISOString();
+        const panelServerId =
+          provision.data?.attributes?.id ||
+          provision.data?.id ||
+          provision.data?.server_id ||
+          idempotencyKey;
+        if (panelServerId === idempotencyKey) {
+          logger.warn('Manual panel provisioning response missing server ID; using external ID fallback.');
+        }
+        const record = {
+          id: idempotencyKey,
+          panelServerId: String(panelServerId),
+          name: payload.name,
+          provider: panelSetup.provider,
+          rewardPlanId: null,
+          rewardPlanName: 'Manual Admin Provision',
+          status: 'active',
+          createdAt: createdAtIso,
+          inviteCountAtClaim: null,
+          createdBy: userId,
+          createdFor: targetUserId,
+          source: 'manual_admin',
+          nodeLocation,
+          eggTemplate,
+          limits: { ramMb, cpuPercent, diskMb },
+        };
+        if (!Array.isArray(data.createdServerRecords[targetUserId])) {
+          data.createdServerRecords[targetUserId] = [];
+        }
+        data.createdServerRecords[targetUserId].push(record);
+        ServerProvision.updateGuild(guildId, { createdServerRecords: data.createdServerRecords });
+
+        await sendAdminLog(interaction.guild, {
+          embeds: [embed({
+            title: '🆕 Manual Server Provisioned',
+            color: Colors.info,
+            fields: [
+              { name: 'Target User', value: `<@${targetUserId}> (\`${targetUserId}\`)`, inline: false },
+              { name: 'Server ID', value: `\`${record.panelServerId}\``, inline: true },
+              { name: 'Server Name', value: `\`${record.name}\``, inline: true },
+              { name: 'Provisioned By', value: `<@${userId}>`, inline: true },
+              { name: 'Node / Egg', value: `\`${nodeLocation}\` / \`${eggTemplate}\``, inline: false },
+              { name: 'Limits', value: `\`${ramMb}MB / ${cpuPercent}% / ${diskMb}MB\``, inline: false },
+            ],
+          })],
+        });
+
+        return interaction.reply({
+          embeds: [embed({
+            title: '✅ Manual Provision Complete',
+            color: Colors.success,
+            description: `Created server \`${record.panelServerId}\` for <@${targetUserId}>.`,
+            fields: [
+              { name: 'Node / Egg', value: `\`${nodeLocation}\` / \`${eggTemplate}\``, inline: false },
+              { name: 'Limits', value: `\`${ramMb}MB / ${cpuPercent}% / ${diskMb}MB\``, inline: false },
+            ],
+          })],
+          flags: MessageFlags.Ephemeral,
+        });
       }
 
       if (field === 'admin_reset') {
