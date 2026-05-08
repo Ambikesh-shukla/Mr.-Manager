@@ -130,6 +130,17 @@ function decryptApiKey(panelSetup) {
   }
 }
 
+function getApiKey(panelSetup) {
+  const decrypted = decryptApiKey(panelSetup);
+  if (decrypted) return decrypted;
+  // Fallback: unencrypted token stored when SERVER_PANEL_SECRET was absent during setup
+  if (panelSetup?.apiKeyPlain) {
+    logger.warn('[ServerSetup] Using plaintext API key — set SERVER_PANEL_SECRET and re-run setup to enable encryption.');
+    return panelSetup.apiKeyPlain;
+  }
+  return null;
+}
+
 function normalizeBaseUrl(baseUrl) {
   return String(baseUrl || '').replace(/\/+$/, '');
 }
@@ -246,9 +257,9 @@ function hoursToMs(hours) {
 }
 
 async function callPanelApi(panelSetup, method, endpoint, body) {
-  const apiKey = decryptApiKey(panelSetup);
+  const apiKey = getApiKey(panelSetup);
   if (!apiKey) {
-    return { ok: false, error: 'Unable to decrypt panel API key. Re-run setup and save again.' };
+    return { ok: false, error: 'Panel API key not found or could not be decrypted. Please re-run setup to configure the panel connection.' };
   }
   try {
     const response = await fetch(endpoint, {
@@ -353,13 +364,19 @@ async function testPanelApi(session) {
 }
 
 function buildSetupEmbed(session) {
+  const hasSecret = !!getSecretKey();
+  const noSecretNote = hasSecret
+    ? ''
+    : '\n\n⚠️ **`SERVER_PANEL_SECRET` is not set.** Your API token will be saved without encryption. To enable AES-256-GCM encryption, add `SERVER_PANEL_SECRET` to your environment variables and re-run setup.';
+
   if (session.step === 10) {
     return embed({
       title: `🧪 Step 10/${TOTAL_SETUP_STEPS} — Preview Configuration`,
       color: Colors.info,
       description:
         'Review settings, test API connection, then save.\n' +
-        'Only official admin-owned APIs are allowed. Password scraping is not supported.',
+        'Only official admin-owned APIs are allowed. Password scraping is not supported.' +
+        noSecretNote,
       fields: [
         { name: 'Provider', value: `\`${getProviderLabel(session.provider)}\``, inline: true },
         { name: 'Base URL', value: `\`${session.baseUrl || 'Not set'}\``, inline: false },
@@ -394,7 +411,7 @@ function buildSetupEmbed(session) {
   return embed({
     title: `⚙️ Step ${session.step}/${TOTAL_SETUP_STEPS} — Panel Setup`,
     color: Colors.primary,
-    description: `${stepText[session.step] ?? 'Continue setup.'}\n\nSafety: official APIs only, no passwords, no scraping.`,
+    description: `${stepText[session.step] ?? 'Continue setup.'}\n\nSafety: official APIs only, no passwords, no scraping.${noSecretNote}`,
     fields: [
       { name: 'Provider', value: `\`${session.provider ? getProviderLabel(session.provider) : 'Not set'}\``, inline: true },
       { name: 'Base URL', value: `\`${session.baseUrl || 'Not set'}\``, inline: true },
@@ -601,12 +618,7 @@ export async function handleServerInteraction(interaction, parts) {
       if (!admin) {
         return interaction.reply({ embeds: [errorEmbed('You need **Administrator** permission for this control.')], flags: MessageFlags.Ephemeral });
       }
-      if (!getSecretKey()) {
-        return interaction.reply({
-          embeds: [errorEmbed('Missing `SERVER_PANEL_SECRET` env. Add it before running setup so API tokens are encrypted.')],
-          flags: MessageFlags.Ephemeral,
-        });
-      }
+      // SERVER_PANEL_SECRET being missing is a non-blocking warning shown inside the wizard.
       const session = upsertSession(guildId, userId);
       session.step = 1;
       return interaction.update(setupPayload(session));
@@ -939,46 +951,52 @@ export async function handleServerInteraction(interaction, parts) {
       }
 
       const encrypted = encryptApiKey(session.apiKey);
-      if (!encrypted) {
-        return interaction.reply({
-          embeds: [errorEmbed('Missing `SERVER_PANEL_SECRET` env. Cannot securely store API token.')],
-          flags: MessageFlags.Ephemeral,
-        });
+
+      const panelSetupData = {
+        provider: session.provider,
+        providerLabel: getProviderLabel(session.provider),
+        baseUrl: session.baseUrl,
+        nodeLocation: session.nodeLocation,
+        eggTemplate: session.eggTemplate,
+        limits: session.limits,
+        serverNameFormat: session.serverNameFormat,
+        inviteRequirement: session.inviteRequirement,
+        cooldownHours: session.cooldownHours,
+        maxServersPerUser: session.maxServersPerUser,
+        testedAt: session.lastApiTest.checkedAt,
+        updatedAt: new Date().toISOString(),
+        updatedBy: userId,
+      };
+
+      if (encrypted) {
+        panelSetupData.apiKeyEncrypted = encrypted.ciphertext;
+        panelSetupData.apiKeyIv = encrypted.iv;
+        panelSetupData.apiKeyTag = encrypted.tag;
+      } else {
+        // No encryption secret available — store token as plaintext with a warning
+        logger.warn(`[ServerSetup] SERVER_PANEL_SECRET not set; saving API token unencrypted for guild ${guildId}.`);
+        panelSetupData.apiKeyPlain = session.apiKey;
       }
 
       ServerProvision.updateGuild(guildId, {
         panelConfigRef: `${session.provider}:${session.nodeLocation}`,
         inviteRequirement: session.inviteRequirement,
-        panelSetup: {
-          provider: session.provider,
-          providerLabel: getProviderLabel(session.provider),
-          baseUrl: session.baseUrl,
-          apiKeyEncrypted: encrypted.ciphertext,
-          apiKeyIv: encrypted.iv,
-          apiKeyTag: encrypted.tag,
-          nodeLocation: session.nodeLocation,
-          eggTemplate: session.eggTemplate,
-          limits: session.limits,
-          serverNameFormat: session.serverNameFormat,
-          inviteRequirement: session.inviteRequirement,
-          cooldownHours: session.cooldownHours,
-          maxServersPerUser: session.maxServersPerUser,
-          testedAt: session.lastApiTest.checkedAt,
-          updatedAt: new Date().toISOString(),
-          updatedBy: userId,
-        },
+        panelSetup: panelSetupData,
       });
 
       clearSession(guildId, userId);
       return interaction.update({
         embeds: [embed({
           title: `✅ Step ${TOTAL_SETUP_STEPS}/${TOTAL_SETUP_STEPS} — Setup Saved`,
-          description: 'Panel API setup saved successfully and will persist across restarts.',
-          color: Colors.success,
+          description: encrypted
+            ? 'Panel API setup saved successfully and will persist across restarts.'
+            : '⚠️ Setup saved **without encryption** because `SERVER_PANEL_SECRET` is not set.\nTo protect the API token, add `SERVER_PANEL_SECRET` to your environment variables and re-run setup.',
+          color: encrypted ? Colors.success : Colors.warning,
           fields: [
             { name: 'Provider', value: `\`${getProviderLabel(session.provider)}\``, inline: true },
             { name: 'Node', value: `\`${session.nodeLocation}\``, inline: true },
             { name: 'Egg', value: `\`${session.eggTemplate}\``, inline: true },
+            ...(!encrypted ? [{ name: '🔐 How to enable encryption', value: 'Set `SERVER_PANEL_SECRET` to any long random string in your environment, then re-run **Setup Panel** to re-encrypt the token.', inline: false }] : []),
           ],
         })],
         components: [],
