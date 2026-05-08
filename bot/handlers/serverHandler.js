@@ -1415,6 +1415,9 @@ export async function handleServerInteraction(interaction, parts) {
           provision.data?.id ||
           provision.data?.server_id ||
           idempotencyKey;
+        if (panelServerId === idempotencyKey) {
+          logger.warn('Manual panel provisioning response missing server ID; using external ID fallback.');
+        }
         const record = {
           id: idempotencyKey,
           panelServerId: String(panelServerId),
