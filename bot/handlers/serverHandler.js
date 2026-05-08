@@ -221,7 +221,7 @@ function buildProvisionPayload(panelSetup, rewardPlan, user, idempotencyKey, inv
     metadata: {
       source: 'invite_reward',
       invite_count: inviteCount,
-      reward_plan_id: rewardPlan?.id ?? 'unknown',
+      reward_plan_id: rewardPlan?.id ?? 'legacy-default',
       provider: panelSetup.provider,
       egg_template: effectiveEgg,
       node_location: effectiveNode,

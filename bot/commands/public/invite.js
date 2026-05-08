@@ -1,4 +1,4 @@
-import { SlashCommandBuilder } from 'discord.js';
+import { SlashCommandBuilder, MessageFlags } from 'discord.js';
 import { randomUUID } from 'crypto';
 import { ServerProvision } from '../../storage/ServerProvision.js';
 import { embed, Colors, successEmbed, errorEmbed } from '../../utils/embeds.js';
@@ -83,14 +83,14 @@ export default {
       if (rewards.some((existing) => existing.id === reward.id)) {
         return interaction.reply({
           embeds: [errorEmbed(`A reward with ID \`${reward.id}\` already exists. Use a different \`reward_id\`.`)],
-          flags: 64,
+          flags: MessageFlags.Ephemeral,
         });
       }
       rewards.push(reward);
       ServerProvision.updateGuild(guildId, { inviteRewards: rewards });
       return interaction.reply({
         embeds: [successEmbed('Invite Reward Added', `Created **${reward.name}** with ID \`${reward.id}\`.`)],
-        flags: 64,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -99,14 +99,14 @@ export default {
       const rewards = Array.isArray(data.inviteRewards) ? data.inviteRewards : [];
       const match = rewards.find((reward) => reward.id === rewardId);
       if (!match) {
-        return interaction.reply({ embeds: [errorEmbed('Reward plan not found.')], flags: 64 });
+        return interaction.reply({ embeds: [errorEmbed('Reward plan not found.')], flags: MessageFlags.Ephemeral });
       }
       ServerProvision.updateGuild(guildId, {
         inviteRewards: rewards.filter((reward) => reward.id !== rewardId),
       });
       return interaction.reply({
         embeds: [successEmbed('Invite Reward Deleted', `Deleted reward plan **${match.name}** (\`${match.id}\`).`)],
-        flags: 64,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -134,7 +134,7 @@ export default {
           color: Colors.info,
           description: lines.join('\n') || 'No reward plans configured yet.',
         })],
-        flags: 64,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -160,7 +160,7 @@ export default {
           { name: 'Available Server Rewards', value: lines.join('\n') || 'No reward plans configured yet.', inline: false },
         ],
       })],
-      flags: 64,
+      flags: MessageFlags.Ephemeral,
     });
   },
 };

@@ -28,8 +28,10 @@ function normalizeLimits(raw, fallback = DEFAULT_LIMITS) {
 
 function normalizeReward(raw, fallback = {}) {
   const invitesRequired = toNonNegativeInt(raw?.invitesRequired, toNonNegativeInt(fallback.invitesRequired, 0));
-  const maxClaims = toMinInt(raw?.maxClaims, 1, toMinInt(fallback.maxClaims, 1, 1));
-  const cooldownHours = toNonNegativeInt(raw?.cooldownHours, toNonNegativeInt(fallback.cooldownHours, 0));
+  const fallbackMaxClaims = toMinInt(fallback.maxClaims, 1, 1);
+  const fallbackCooldownHours = toNonNegativeInt(fallback.cooldownHours, 0);
+  const maxClaims = toMinInt(raw?.maxClaims, 1, fallbackMaxClaims);
+  const cooldownHours = toNonNegativeInt(raw?.cooldownHours, fallbackCooldownHours);
   const limits = normalizeLimits(raw?.limits, normalizeLimits(fallback?.limits));
   const id = rewardIdFromData(raw?.id ?? fallback.id);
   const name = String(raw?.name ?? fallback.name ?? `${invitesRequired} Invites Reward`).trim().slice(0, 80);
