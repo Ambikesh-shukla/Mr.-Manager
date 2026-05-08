@@ -24,10 +24,13 @@ import {
 
 const setupSessions = new Map();
 const pendingProvisionClaims = new Set();
+const pendingAdminRewardSelections = new Map();
+const panelNodeCache = new Map();
 const API_TEST_TIMEOUT_MS = 10_000;
 const MS_PER_HOUR = 3_600_000;
 const MIN_API_TOKEN_LENGTH = 8;
 const TOTAL_SETUP_STEPS = 12;
+const PANEL_NODE_CACHE_TTL_MS = 5 * 60_000;
 
 const PROVIDERS = [
   { label: 'Pterodactyl', value: 'pterodactyl', description: 'Official Application API only' },
@@ -61,6 +64,257 @@ function getProvisionModeLabel(value) {
   return PROVISION_MODES.find((mode) => mode.value === value)?.label ?? 'Invite Reward Mode';
 }
 
+function normalizeNodeLimits(limits = {}, fallback = { ramMb: 4096, cpuPercent: 100, diskMb: 10240 }) {
+  const ramMb = parseNonNegativeInt(limits.ramMb, fallback.ramMb);
+  const cpuPercent = parseNonNegativeInt(limits.cpuPercent, fallback.cpuPercent);
+  const diskMb = parseNonNegativeInt(limits.diskMb, fallback.diskMb);
+  return {
+    ramMb: Math.max(1, ramMb),
+    cpuPercent: Math.max(1, cpuPercent),
+    diskMb: Math.max(1, diskMb),
+  };
+}
+
+function sanitizeNodeConfig(raw, fallbackLimits = { ramMb: 4096, cpuPercent: 100, diskMb: 10240 }) {
+  const id = String(raw?.id ?? '').trim().slice(0, 80);
+  const name = String(raw?.name ?? '').trim().slice(0, 80);
+  const location = String(raw?.location ?? '').trim().slice(0, 80);
+  const panelNodeId = String(raw?.panelNodeId ?? '').trim().slice(0, 80);
+  if (!id || !name || !location || !panelNodeId) return null;
+  return {
+    id,
+    name,
+    location,
+    panelNodeId,
+    available: normalizeNodeLimits(raw?.available, fallbackLimits),
+    createdAt: raw?.createdAt ?? null,
+    updatedAt: raw?.updatedAt ?? null,
+  };
+}
+
+function getConfiguredNodes(panelSetup) {
+  const fallbackLimits = normalizeNodeLimits(panelSetup?.limits ?? {});
+  const configured = Array.isArray(panelSetup?.nodes) ? panelSetup.nodes : [];
+  const deduped = new Map();
+  for (const raw of configured) {
+    const node = sanitizeNodeConfig(raw, fallbackLimits);
+    if (!node) continue;
+    deduped.set(node.id, node);
+  }
+  const nodes = [...deduped.values()];
+  if (nodes.length > 0) return nodes;
+
+  if (panelSetup?.nodeLocation) {
+    return [{
+      id: 'legacy-default-node',
+      name: 'Default Node',
+      location: String(panelSetup.nodeLocation).trim().slice(0, 80),
+      panelNodeId: String(panelSetup.nodeId ?? panelSetup.nodeLocation).trim().slice(0, 80),
+      available: normalizeNodeLimits(panelSetup?.limits ?? fallbackLimits, fallbackLimits),
+      createdAt: null,
+      updatedAt: panelSetup?.updatedAt ?? null,
+    }];
+  }
+  return [];
+}
+
+function getDefaultConfiguredNode(panelSetup) {
+  const nodes = getConfiguredNodes(panelSetup);
+  if (nodes.length === 0) return null;
+  const defaultNode = nodes.find((node) => node.id === panelSetup?.defaultNodeId);
+  return defaultNode ?? nodes[0];
+}
+
+function findConfiguredNodeBySelector(panelSetup, selector) {
+  const value = String(selector ?? '').trim();
+  if (!value) return null;
+  const nodes = getConfiguredNodes(panelSetup);
+  return nodes.find((node) => (
+    node.id === value
+    || node.panelNodeId === value
+    || node.location === value
+    || node.name === value
+  )) ?? null;
+}
+
+function setSessionFromPanelSetup(session, panelSetup) {
+  if (!panelSetup || typeof panelSetup !== 'object') return;
+  const defaultNode = getDefaultConfiguredNode(panelSetup);
+  const fallbackLimits = defaultNode?.available ?? normalizeNodeLimits(panelSetup?.limits ?? {});
+  session.provider = panelSetup.provider ?? session.provider;
+  session.baseUrl = panelSetup.baseUrl ?? session.baseUrl;
+  session.nodeLocation = defaultNode?.location ?? panelSetup.nodeLocation ?? session.nodeLocation;
+  session.eggTemplate = panelSetup.eggTemplate ?? session.eggTemplate;
+  session.limits = normalizeNodeLimits(panelSetup?.limits ?? fallbackLimits, fallbackLimits);
+  session.serverNameFormat = panelSetup.serverNameFormat ?? session.serverNameFormat;
+  session.inviteRequirement = parseNonNegativeInt(panelSetup.inviteRequirement, session.inviteRequirement);
+  session.cooldownHours = parseNonNegativeInt(panelSetup.cooldownHours, session.cooldownHours);
+  session.maxServersPerUser = Math.max(1, parseNonNegativeInt(panelSetup.maxServersPerUser, session.maxServersPerUser));
+  session.provisioningMode = normalizeProvisioningMode(panelSetup.provisioningMode ?? session.provisioningMode);
+  session.nodes = getConfiguredNodes(panelSetup);
+  session.defaultNodeId = defaultNode?.id ?? session.nodes[0]?.id ?? null;
+}
+
+function upsertLegacyNodeInSession(session) {
+  if (!session.nodeLocation) return;
+  if (!Array.isArray(session.nodes)) session.nodes = [];
+  const existing = session.nodes.find((node) => node.id === session.defaultNodeId) ?? session.nodes[0] ?? null;
+  const nowIso = new Date().toISOString();
+  if (existing) {
+    existing.location = session.nodeLocation;
+    existing.panelNodeId = existing.panelNodeId || session.nodeLocation;
+    existing.available = normalizeNodeLimits(session.limits, existing.available);
+    existing.updatedAt = nowIso;
+    session.defaultNodeId = existing.id;
+    return;
+  }
+  const created = {
+    id: randomUUID(),
+    name: 'Default Node',
+    location: session.nodeLocation,
+    panelNodeId: session.nodeLocation,
+    available: normalizeNodeLimits(session.limits),
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  };
+  session.nodes.push(created);
+  session.defaultNodeId = created.id;
+}
+
+function summarizeSessionNodes(session) {
+  const nodes = Array.isArray(session.nodes) ? session.nodes : [];
+  if (nodes.length === 0) return 'No nodes configured yet.';
+  const summary = nodes.slice(0, 10).map((node) => {
+    const marker = node.id === session.defaultNodeId ? '⭐ ' : '';
+    return `${marker}**${node.name}** (\`${node.id}\`) • panel \`${node.panelNodeId}\` • ${node.location} • ${node.available.ramMb}MB/${node.available.cpuPercent}%/${node.available.diskMb}MB`;
+  }).join('\n');
+  return summary.length > 1000 ? `${summary.slice(0, 997)}...` : summary;
+}
+
+function buildNodeSelectOptions(session, includeAuto = false) {
+  const nodes = Array.isArray(session.nodes) ? session.nodes : [];
+  const options = nodes.slice(0, 25).map((node) => ({
+    label: `${node.name}`.slice(0, 100),
+    value: node.id,
+    description: `${node.location} • panel ${node.panelNodeId}`.slice(0, 100),
+    default: node.id === session.defaultNodeId,
+  }));
+  if (includeAuto) {
+    options.unshift({
+      label: 'Automatic (default node)',
+      value: 'auto',
+      description: 'Use the default configured node automatically',
+    });
+  }
+  return options;
+}
+
+function buildNodeManagerPayload(session) {
+  const canManage = session.step >= 2;
+  return {
+    embeds: [embed({
+      title: '🧩 Node Manager',
+      color: Colors.info,
+      description: 'Manage connected panel nodes and assign reward plans to node IDs.',
+      fields: [
+        { name: 'Configured Nodes', value: String((session.nodes ?? []).length), inline: true },
+        { name: 'Default Node', value: `\`${session.defaultNodeId ?? 'Not set'}\``, inline: true },
+        { name: 'Node List', value: summarizeSessionNodes(session), inline: false },
+      ],
+    })],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('server:btn:wiz_node_add').setLabel('Add Node').setStyle(ButtonStyle.Success).setDisabled(!canManage),
+        new ButtonBuilder().setCustomId('server:btn:wiz_node_edit').setLabel('Edit Node').setStyle(ButtonStyle.Secondary).setDisabled((session.nodes ?? []).length === 0),
+        new ButtonBuilder().setCustomId('server:btn:wiz_node_remove').setLabel('Remove Node').setStyle(ButtonStyle.Danger).setDisabled((session.nodes ?? []).length === 0),
+        new ButtonBuilder().setCustomId('server:btn:wiz_node_default').setLabel('Set Default').setStyle(ButtonStyle.Primary).setDisabled((session.nodes ?? []).length === 0),
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('server:btn:wiz_reward_node_assign').setLabel('Assign Reward Plan Node').setStyle(ButtonStyle.Secondary),
+      ),
+    ],
+    flags: MessageFlags.Ephemeral,
+  };
+}
+
+function getPanelNodeCacheKey(guildId, panelSetup) {
+  return `${guildId}:${panelSetup?.provider ?? 'unknown'}:${normalizeBaseUrl(panelSetup?.baseUrl)}:${panelSetup?.updatedAt ?? 'na'}`;
+}
+
+function parsePanelNodeListResponse(data) {
+  if (Array.isArray(data?.data)) {
+    return data.data.map((entry) => ({
+      id: String(entry?.attributes?.id ?? entry?.id ?? '').trim(),
+      name: String(entry?.attributes?.name ?? entry?.name ?? '').trim(),
+      location: String(entry?.attributes?.location ?? entry?.location ?? '').trim(),
+    })).filter((node) => node.id || node.name || node.location);
+  }
+  if (Array.isArray(data?.nodes)) {
+    return data.nodes.map((entry) => ({
+      id: String(entry?.id ?? '').trim(),
+      name: String(entry?.name ?? '').trim(),
+      location: String(entry?.location ?? '').trim(),
+    })).filter((node) => node.id || node.name || node.location);
+  }
+  return [];
+}
+
+async function getCachedPanelNodes(guildId, panelSetup) {
+  if (panelSetup?.provider === 'custom') {
+    return { ok: true, nodes: [], cached: true, skipped: true };
+  }
+  const endpoint = getPanelApiEndpoint(panelSetup, 'test');
+  if (!endpoint) return { ok: false, error: 'Invalid panel API base URL in setup.' };
+  const cacheKey = getPanelNodeCacheKey(guildId, panelSetup);
+  const now = Date.now();
+  const cached = panelNodeCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return { ok: true, nodes: cached.nodes, cached: true };
+  }
+  const response = await callPanelApi(panelSetup, 'GET', endpoint);
+  if (!response.ok) return { ok: false, error: response.error };
+  const nodes = parsePanelNodeListResponse(response.data);
+  panelNodeCache.set(cacheKey, { nodes, expiresAt: now + PANEL_NODE_CACHE_TTL_MS });
+  return { ok: true, nodes, cached: false };
+}
+
+async function resolveProvisionNode(guildId, panelSetup, options = {}) {
+  const configured = getConfiguredNodes(panelSetup);
+  if (configured.length === 0) {
+    return { ok: false, error: 'No configured node is available. Add at least one node in Setup Panel.' };
+  }
+  const requestedNodeId = String(options.nodeId ?? '').trim();
+  const rewardNodeId = String(options.rewardNodeId ?? '').trim();
+  let selected = null;
+  if (requestedNodeId && requestedNodeId !== 'auto') {
+    selected = findConfiguredNodeBySelector(panelSetup, requestedNodeId);
+    if (!selected) return { ok: false, error: `Selected node \`${requestedNodeId}\` is not configured.` };
+  } else if (rewardNodeId) {
+    selected = findConfiguredNodeBySelector(panelSetup, rewardNodeId);
+    if (!selected) return { ok: false, error: `Reward plan targets node \`${rewardNodeId}\`, but it is not configured.` };
+  } else {
+    selected = getDefaultConfiguredNode(panelSetup);
+  }
+  if (!selected) {
+    return { ok: false, error: 'No default node is configured. Set a default node in Setup Panel.' };
+  }
+  const remote = await getCachedPanelNodes(guildId, panelSetup);
+  if (!remote.ok) {
+    return { ok: false, error: `Failed to verify panel node: ${remote.error}` };
+  }
+  if (!remote.skipped && remote.nodes.length > 0) {
+    const exists = remote.nodes.some((node) => (
+      node.id === selected.panelNodeId
+      || node.name === selected.name
+      || node.location === selected.location
+    ));
+    if (!exists) {
+      return { ok: false, error: `Configured node \`${selected.name}\` (\`${selected.panelNodeId}\`) does not exist on the panel API.` };
+    }
+  }
+  return { ok: true, node: selected };
+}
+
 function getSession(guildId, userId) {
   return setupSessions.get(setupKey(guildId, userId)) ?? null;
 }
@@ -83,6 +337,8 @@ function upsertSession(guildId, userId) {
     cooldownHours: 24,
     maxServersPerUser: 1,
     provisioningMode: 'invite_reward',
+    nodes: [],
+    defaultNodeId: null,
     lastApiTest: null,
   };
   setupSessions.set(setupKey(guildId, userId), session);
@@ -201,7 +457,8 @@ function formatRewardLine(reward, inviteCount, data, panelSetup, userId) {
     : '';
   const remaining = eligibility.remainingInvites > 0 ? ` • need ${eligibility.remainingInvites} more invites` : '';
   const status = eligibility.ok ? '✅ Eligible' : '❌ Not eligible';
-  return `• **${reward.name}** (\`${reward.id}\`) — ${reward.invitesRequired} invites, ${reward.limits.ramMb}MB RAM, ${reward.limits.cpuPercent}% CPU, ${reward.limits.diskMb}MB Disk, claims ${eligibility.rewardClaim.claimCount}/${reward.maxClaims}${remaining}${cooldownText} • ${status}`;
+  const nodeTarget = reward.nodeId ? ` • node \`${reward.nodeId}\`` : '';
+  return `• **${reward.name}** (\`${reward.id}\`) — ${reward.invitesRequired} invites, ${reward.limits.ramMb}MB RAM, ${reward.limits.cpuPercent}% CPU, ${reward.limits.diskMb}MB Disk${nodeTarget}, claims ${eligibility.rewardClaim.claimCount}/${reward.maxClaims}${remaining}${cooldownText} • ${status}`;
 }
 
 function getPanelApiEndpoint(panelSetup, kind, serverId = null) {
@@ -229,7 +486,8 @@ function getPanelApiEndpoint(panelSetup, kind, serverId = null) {
 
 function buildProvisionPayload(panelSetup, rewardPlan, user, idempotencyKey, inviteCount, options = {}) {
   const serverName = renderServerName(panelSetup.serverNameFormat, user);
-  const effectiveNode = options.nodeLocation || rewardPlan?.nodeLocation || panelSetup.nodeLocation;
+  const selectedNode = options.resolvedNode ?? null;
+  const effectiveNode = selectedNode?.location || options.nodeLocation || rewardPlan?.nodeLocation || panelSetup.nodeLocation;
   const effectiveEgg = options.eggTemplate || rewardPlan?.eggTemplate || panelSetup.eggTemplate;
   const effectiveLimits = options.limits ?? rewardPlan?.limits ?? panelSetup.limits ?? {};
   const source = options.source || 'invite_reward';
@@ -248,6 +506,8 @@ function buildProvisionPayload(panelSetup, rewardPlan, user, idempotencyKey, inv
       provider: panelSetup.provider,
       egg_template: effectiveEgg,
       node_location: effectiveNode,
+      configured_node_id: selectedNode?.id ?? rewardPlan?.nodeId ?? null,
+      panel_node_id: selectedNode?.panelNodeId ?? null,
       provisioned_by: options.provisionedBy ?? null,
     },
     limits: {
@@ -331,6 +591,203 @@ function getRecordServerId(record) {
   return String(record?.panelServerId ?? record?.id ?? 'unknown');
 }
 
+async function provisionRewardClaim(interaction, { selectedRewardId, selectedNodeId = 'auto' }) {
+  const guildId = interaction.guildId;
+  const userId = interaction.user.id;
+  const lock = claimLockKey(guildId, userId);
+  if (pendingProvisionClaims.has(lock)) {
+    return interaction.followUp({
+      embeds: [errorEmbed('A provisioning request for you is already in progress. Please wait.')],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  pendingProvisionClaims.add(lock);
+  try {
+    const data = ServerProvision.ensureGuild(guildId);
+    const panelSetup = data.panelSetup;
+    if (!panelSetup) {
+      return interaction.followUp({
+        embeds: [errorEmbed('Panel setup is not configured yet. Ask an admin to run **Setup Panel** first.')],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+    const provisionMode = getProvisionMode(data, panelSetup);
+    if (provisionMode === 'manual_admin') {
+      return interaction.followUp({
+        embeds: [errorEmbed('Invite reward claiming is disabled because this guild is in **Manual Admin Mode**.')],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+    const rewardPlan = getInviteRewardPlans(data, panelSetup).find((reward) => reward.id === selectedRewardId);
+    if (!rewardPlan) {
+      return interaction.followUp({
+        embeds: [errorEmbed('Selected reward plan was not found. Please try again.')],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    const inviteCount = await fetchInviteCountForMember(interaction.guild, userId);
+    const eligibility = getRewardEligibility({
+      data,
+      panelSetup,
+      userId,
+      inviteCount,
+      reward: rewardPlan,
+    });
+    if (!eligibility.ok) {
+      const cooldownHint = eligibility.nextClaimAt > Date.now()
+        ? ` Try again in **${formatDuration(eligibility.nextClaimAt - Date.now())}**.`
+        : '';
+      return interaction.followUp({
+        embeds: [errorEmbed(`${eligibility.reason}${cooldownHint}`)],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    const resolvedNode = await resolveProvisionNode(guildId, panelSetup, {
+      nodeId: selectedNodeId,
+      rewardNodeId: rewardPlan.nodeId,
+    });
+    if (!resolvedNode.ok) {
+      return interaction.followUp({
+        embeds: [errorEmbed(resolvedNode.error)],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    const claim = ServerProvision.ensureUserClaim(guildId, userId);
+    const rewardClaim = getRewardClaimState(claim, rewardPlan.id);
+    const servers = ServerProvision.ensureUserServers(guildId, userId);
+    const cooldowns = ServerProvision.ensureUserCooldowns(guildId, userId);
+    const history = ServerProvision.ensureClaimHistory(guildId);
+    const idempotencyKey = `${guildId}:${userId}:${randomUUID()}`;
+    const endpoint = getPanelApiEndpoint(panelSetup, 'create');
+    if (!endpoint) {
+      return interaction.followUp({
+        embeds: [errorEmbed('Invalid panel API base URL in setup. Re-run setup and save again.')],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    const payload = buildProvisionPayload(panelSetup, rewardPlan, interaction.user, idempotencyKey, inviteCount, {
+      resolvedNode: resolvedNode.node,
+    });
+    const provision = await callPanelApi(panelSetup, 'POST', endpoint, payload);
+    if (!provision.ok) {
+      return interaction.followUp({
+        embeds: [errorEmbed(`Failed to create server: ${provision.error}`)],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    const createdAtIso = new Date().toISOString();
+    const panelServerId =
+      provision.data?.attributes?.id ||
+      provision.data?.id ||
+      provision.data?.server_id ||
+      idempotencyKey;
+    if (panelServerId === idempotencyKey) {
+      logger.warn('Panel API did not return a server ID; falling back to external ID key.');
+    }
+    const serverName = payload.name;
+    const record = {
+      id: idempotencyKey,
+      panelServerId: String(panelServerId),
+      name: serverName,
+      provider: panelSetup.provider,
+      rewardPlanId: rewardPlan.id,
+      rewardPlanName: rewardPlan.name,
+      status: 'active',
+      createdAt: createdAtIso,
+      inviteCountAtClaim: inviteCount,
+      createdBy: userId,
+      nodeId: resolvedNode.node.id,
+      panelNodeId: resolvedNode.node.panelNodeId,
+      nodeLocation: resolvedNode.node.location,
+    };
+    servers.push(record);
+    claim.claimed = true;
+    claim.claimCount = (claim.claimCount ?? 0) + 1;
+    claim.lastClaimAt = createdAtIso;
+    claim.lastInviteSnapshot = inviteCount;
+    claim.lastRewardId = rewardPlan.id;
+    if (!claim.rewardClaims || typeof claim.rewardClaims !== 'object') {
+      claim.rewardClaims = {};
+    }
+    claim.rewardClaims[rewardPlan.id] = {
+      claimCount: rewardClaim.claimCount + 1,
+      lastClaimAt: createdAtIso,
+      lastInviteSnapshot: inviteCount,
+    };
+    if (rewardPlan.cooldownHours > 0) {
+      setRewardCooldown(cooldowns, rewardPlan.id, Date.now() + hoursToMs(rewardPlan.cooldownHours));
+    } else {
+      setRewardCooldown(cooldowns, rewardPlan.id, 0);
+    }
+    history.push({
+      id: randomUUID(),
+      userId,
+      rewardPlanId: rewardPlan.id,
+      rewardPlanName: rewardPlan.name,
+      invitesAtClaim: inviteCount,
+      panelServerId: record.panelServerId,
+      createdAt: createdAtIso,
+      claimCountForReward: claim.rewardClaims[rewardPlan.id].claimCount,
+      nodeId: resolvedNode.node.id,
+      panelNodeId: resolvedNode.node.panelNodeId,
+    });
+    ServerProvision.updateGuild(guildId, {
+      userClaims: data.userClaims,
+      createdServerRecords: data.createdServerRecords,
+      cooldowns: data.cooldowns,
+      claimHistory: data.claimHistory,
+    });
+
+    const detailEmbed = embed({
+      title: '✅ Server Created',
+      color: Colors.success,
+      description: 'Your invite reward server has been provisioned successfully.',
+      fields: [
+        { name: 'Reward Plan', value: `\`${rewardPlan.name}\``, inline: true },
+        { name: 'Server Name', value: `\`${serverName}\``, inline: true },
+        { name: 'Server ID', value: `\`${record.panelServerId}\``, inline: true },
+        { name: 'Node', value: `\`${resolvedNode.node.name}\` (\`${resolvedNode.node.id}\`)`, inline: true },
+        { name: 'Provider', value: `\`${panelSetup.providerLabel ?? panelSetup.provider}\``, inline: true },
+        { name: 'Plan Claim Count', value: String(claim.rewardClaims[rewardPlan.id].claimCount), inline: true },
+        { name: 'Invites Used', value: String(inviteCount), inline: true },
+      ],
+    });
+
+    try {
+      await interaction.user.send({ embeds: [detailEmbed] });
+    } catch (err) {
+      logger.warn(`Could not DM server details to ${interaction.user.tag}: ${err?.message ?? 'unknown error'}`);
+    }
+    await interaction.followUp({ embeds: [detailEmbed], flags: MessageFlags.Ephemeral });
+
+    await sendAdminLog(interaction.guild, {
+      embeds: [embed({
+        title: '🆕 Reward Server Provisioned',
+        color: Colors.info,
+        fields: [
+          { name: 'User', value: `<@${userId}> (\`${userId}\`)`, inline: false },
+          { name: 'Reward Plan', value: `\`${rewardPlan.name}\` (\`${rewardPlan.id}\`)`, inline: false },
+          { name: 'Server ID', value: `\`${record.panelServerId}\``, inline: true },
+          { name: 'Server Name', value: `\`${record.name}\``, inline: true },
+          { name: 'Provider', value: `\`${record.provider}\``, inline: true },
+          { name: 'Node', value: `\`${resolvedNode.node.name}\` (\`${resolvedNode.node.id}\`)`, inline: false },
+          { name: 'Invites', value: String(inviteCount), inline: true },
+          { name: 'Total Claims', value: String(claim.claimCount), inline: true },
+        ],
+      })],
+    });
+    return;
+  } finally {
+    pendingProvisionClaims.delete(lock);
+  }
+}
+
 async function testPanelApi(session) {
   if (!session.baseUrl || !session.apiKey) {
     return { ok: false, message: 'Base URL and API token must be set first.', checkedAt: new Date().toISOString() };
@@ -387,9 +844,12 @@ function buildSetupEmbed(session) {
         { name: 'Provider', value: `\`${getProviderLabel(session.provider)}\``, inline: true },
         { name: 'Base URL', value: `\`${session.baseUrl || 'Not set'}\``, inline: false },
         { name: 'API Token', value: maskSecret(session.apiKey), inline: true },
-        { name: 'Node/Location', value: `\`${session.nodeLocation || 'Not set'}\``, inline: true },
+        { name: 'Default Node ID', value: `\`${session.defaultNodeId || 'Not set'}\``, inline: true },
+        { name: 'Node/Location (legacy)', value: `\`${session.nodeLocation || 'Not set'}\``, inline: true },
         { name: 'Egg/Template', value: `\`${session.eggTemplate || 'Not set'}\``, inline: true },
         { name: 'RAM / CPU / Disk', value: `\`${session.limits.ramMb}MB / ${session.limits.cpuPercent}% / ${session.limits.diskMb}MB\``, inline: false },
+        { name: 'Configured Nodes', value: String((session.nodes ?? []).length), inline: true },
+        { name: 'Nodes', value: summarizeSessionNodes(session), inline: false },
         { name: 'Server Name Format', value: `\`${session.serverNameFormat}\``, inline: false },
         { name: 'Invite Requirement', value: `\`${session.inviteRequirement}\``, inline: true },
         { name: 'Cooldown / Max per User', value: `\`${session.cooldownHours}h / ${session.maxServersPerUser}\``, inline: true },
@@ -464,6 +924,9 @@ function buildSetupComponents(session) {
         new ButtonBuilder().setCustomId('server:btn:wiz_test').setLabel('Test API').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('server:btn:wiz_save').setLabel('Save Setup').setStyle(ButtonStyle.Success).setDisabled(!session.lastApiTest?.ok),
         new ButtonBuilder().setCustomId('server:btn:wiz_back').setLabel('Back').setStyle(ButtonStyle.Secondary),
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('server:btn:wiz_nodes').setLabel('Manage Nodes').setStyle(ButtonStyle.Primary),
       ),
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('server:btn:wiz_cancel').setLabel('Cancel').setStyle(ButtonStyle.Danger),
@@ -558,6 +1021,8 @@ function buildDashboard(guildId, userId, isUserAdmin) {
   const userServers = data.createdServerRecords?.[userId] ?? [];
   const userClaim = data.userClaims?.[userId] ?? null;
   const panelSetup = data.panelSetup ?? null;
+  const configuredNodes = getConfiguredNodes(panelSetup);
+  const defaultNode = getDefaultConfiguredNode(panelSetup);
   const provisionMode = getProvisionMode(data, panelSetup);
   const rewardPlans = getInviteRewardPlans(data, panelSetup);
 
@@ -603,12 +1068,13 @@ function buildDashboard(guildId, userId, isUserAdmin) {
         {
           name: 'Panel Config',
           value: panelSetup
-            ? `Configured (\`${panelSetup.providerLabel ?? panelSetup.provider}\` • \`${panelSetup.nodeLocation}\`)`
+            ? `Configured (\`${panelSetup.providerLabel ?? panelSetup.provider}\` • default \`${defaultNode?.name ?? defaultNode?.id ?? panelSetup.nodeLocation ?? 'unknown'}\`)`
             : 'Not configured',
           inline: true,
         },
         { name: 'Provisioning Mode', value: getProvisionModeLabel(provisionMode), inline: true },
         { name: 'Reward Plans', value: String(rewardPlans.length), inline: true },
+        { name: 'Nodes', value: String(configuredNodes.length), inline: true },
         { name: 'My Claims', value: userClaim ? `Used: ${userClaim.claimCount ?? 0}` : 'None yet', inline: true },
         { name: 'My Servers', value: String(userServers.length), inline: true },
       ],
@@ -649,6 +1115,7 @@ export async function handleServerInteraction(interaction, parts) {
       // SERVER_PANEL_SECRET being missing is a non-blocking warning shown inside the wizard.
       const session = upsertSession(guildId, userId);
       const existing = ServerProvision.ensureGuild(guildId);
+      setSessionFromPanelSetup(session, existing.panelSetup);
       session.provisioningMode = getProvisionMode(existing, existing.panelSetup);
       session.step = 1;
       return interaction.update(setupPayload(session));
@@ -831,6 +1298,87 @@ export async function handleServerInteraction(interaction, parts) {
       return showServerDashboard(interaction);
     }
 
+    if (action === 'wiz_nodes') {
+      const session = getSession(guildId, userId);
+      if (!session) {
+        return interaction.reply({ embeds: [errorEmbed('Setup session expired. Click **Setup Panel** again.')], flags: MessageFlags.Ephemeral });
+      }
+      if (!admin) {
+        return interaction.reply({ embeds: [errorEmbed('Only administrators can modify setup.')], flags: MessageFlags.Ephemeral });
+      }
+      return interaction.reply(buildNodeManagerPayload(session));
+    }
+
+    if (action === 'wiz_node_add') {
+      const session = getSession(guildId, userId);
+      if (!session) {
+        return interaction.reply({ embeds: [errorEmbed('Setup session expired. Click **Setup Panel** again.')], flags: MessageFlags.Ephemeral });
+      }
+      if (!admin) {
+        return interaction.reply({ embeds: [errorEmbed('Only administrators can modify setup.')], flags: MessageFlags.Ephemeral });
+      }
+      const modal = new ModalBuilder().setCustomId('server:modal:wiz_node_add').setTitle('Add Panel Node');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel('Node Name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setPlaceholder('US-East #1')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('location').setLabel('Location').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setPlaceholder('us-east')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('panelid').setLabel('Panel Node ID').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setPlaceholder('1 or node-1')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('limits').setLabel('Available RAM,CPU,Disk').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(40).setPlaceholder('4096,100,10240')),
+      );
+      return interaction.showModal(modal);
+    }
+
+    if (action === 'wiz_node_edit' || action === 'wiz_node_remove' || action === 'wiz_node_default') {
+      const session = getSession(guildId, userId);
+      if (!session) {
+        return interaction.reply({ embeds: [errorEmbed('Setup session expired. Click **Setup Panel** again.')], flags: MessageFlags.Ephemeral });
+      }
+      if (!admin) {
+        return interaction.reply({ embeds: [errorEmbed('Only administrators can modify setup.')], flags: MessageFlags.Ephemeral });
+      }
+      const options = buildNodeSelectOptions(session);
+      if (options.length === 0) {
+        return interaction.reply({ embeds: [errorEmbed('No nodes available. Add a node first.')], flags: MessageFlags.Ephemeral });
+      }
+      const menuAction = action === 'wiz_node_edit'
+        ? 'wiz_node_edit_select'
+        : action === 'wiz_node_remove'
+          ? 'wiz_node_remove_select'
+          : 'wiz_node_default_select';
+      const title = action === 'wiz_node_edit'
+        ? 'Select node to edit'
+        : action === 'wiz_node_remove'
+          ? 'Select node to remove'
+          : 'Select default node';
+      return interaction.reply({
+        embeds: [embed({ title: '🧩 Node Selection', color: Colors.info, description: title })],
+        components: [
+          new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+              .setCustomId(`server:menu:${menuAction}`)
+              .setPlaceholder(title)
+              .addOptions(options),
+          ),
+        ],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    if (action === 'wiz_reward_node_assign') {
+      const session = getSession(guildId, userId);
+      if (!session) {
+        return interaction.reply({ embeds: [errorEmbed('Setup session expired. Click **Setup Panel** again.')], flags: MessageFlags.Ephemeral });
+      }
+      if (!admin) {
+        return interaction.reply({ embeds: [errorEmbed('Only administrators can modify setup.')], flags: MessageFlags.Ephemeral });
+      }
+      const modal = new ModalBuilder().setCustomId('server:modal:wiz_reward_node_assign').setTitle('Assign Reward Plan Node');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('rewardid').setLabel('Reward Plan ID').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setPlaceholder('legacy-default or custom reward id')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nodeid').setLabel('Node ID (blank = auto/default)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setPlaceholder('Configured node id')),
+      );
+      return interaction.showModal(modal);
+    }
+
     if (action === 'admin_view') {
       if (!admin) {
         return interaction.reply({ embeds: [errorEmbed('Only administrators can use this control.')], flags: MessageFlags.Ephemeral });
@@ -948,10 +1496,10 @@ export async function handleServerInteraction(interaction, parts) {
         new ActionRowBuilder().addComponents(
           new TextInputBuilder()
             .setCustomId('node')
-            .setLabel('Node/Location (optional)')
+            .setLabel('Node ID / panel ID / location (optional)')
             .setStyle(TextInputStyle.Short)
             .setRequired(false)
-            .setPlaceholder(panelSetup.nodeLocation || 'node-1')
+            .setPlaceholder(panelSetup.defaultNodeId || panelSetup.nodeId || panelSetup.nodeLocation || 'auto')
             .setMaxLength(80),
         ),
         new ActionRowBuilder().addComponents(
@@ -1040,15 +1588,30 @@ export async function handleServerInteraction(interaction, parts) {
         return interaction.reply({ embeds: [errorEmbed('Run a successful **Test API** before saving.')], flags: MessageFlags.Ephemeral });
       }
 
+      upsertLegacyNodeInSession(session);
+      const normalizedNodes = (session.nodes ?? [])
+        .map((node) => sanitizeNodeConfig(node, session.limits))
+        .filter(Boolean);
+      const defaultNode = normalizedNodes.find((node) => node.id === session.defaultNodeId) ?? normalizedNodes[0] ?? null;
+      if (!defaultNode) {
+        return interaction.reply({ embeds: [errorEmbed('At least one node must be configured before saving setup.')], flags: MessageFlags.Ephemeral });
+      }
+      session.defaultNodeId = defaultNode.id;
+      session.nodeLocation = defaultNode.location;
+      session.limits = normalizeNodeLimits(defaultNode.available, session.limits);
+
       const encrypted = encryptApiKey(session.apiKey);
 
       const panelSetupData = {
         provider: session.provider,
         providerLabel: getProviderLabel(session.provider),
         baseUrl: session.baseUrl,
-        nodeLocation: session.nodeLocation,
+        nodeLocation: defaultNode.location,
+        nodeId: defaultNode.panelNodeId,
+        nodes: normalizedNodes,
+        defaultNodeId: defaultNode.id,
         eggTemplate: session.eggTemplate,
-        limits: session.limits,
+        limits: normalizeNodeLimits(defaultNode.available, session.limits),
         serverNameFormat: session.serverNameFormat,
         inviteRequirement: session.inviteRequirement,
         cooldownHours: session.cooldownHours,
@@ -1070,7 +1633,7 @@ export async function handleServerInteraction(interaction, parts) {
       }
 
       ServerProvision.updateGuild(guildId, {
-        panelConfigRef: `${session.provider}:${session.nodeLocation}`,
+        panelConfigRef: `${session.provider}:${defaultNode.location}`,
         inviteRequirement: session.inviteRequirement,
         provisioningMode: normalizeProvisioningMode(session.provisioningMode),
         panelSetup: panelSetupData,
@@ -1086,7 +1649,9 @@ export async function handleServerInteraction(interaction, parts) {
           color: encrypted ? Colors.success : Colors.warning,
           fields: [
             { name: 'Provider', value: `\`${getProviderLabel(session.provider)}\``, inline: true },
-            { name: 'Node', value: `\`${session.nodeLocation}\``, inline: true },
+            { name: 'Default Node', value: `\`${defaultNode.name}\` (\`${defaultNode.id}\`)`, inline: true },
+            { name: 'Panel Node ID', value: `\`${defaultNode.panelNodeId}\``, inline: true },
+            { name: 'Total Nodes', value: String(normalizedNodes.length), inline: true },
             { name: 'Egg', value: `\`${session.eggTemplate}\``, inline: true },
             ...(!encrypted ? [{ name: '🔐 How to enable encryption', value: 'Set `SERVER_PANEL_SECRET` to any long random string in your environment, then re-run **Setup Panel** to re-encrypt the token.', inline: false }] : []),
           ],
@@ -1103,17 +1668,8 @@ export async function handleServerInteraction(interaction, parts) {
 
     if (parts[2] === 'reward_create') {
       const selectedRewardId = interaction.values[0];
-      const lock = claimLockKey(guildId, userId);
-      if (pendingProvisionClaims.has(lock)) {
-        return interaction.reply({
-          embeds: [errorEmbed('A provisioning request for you is already in progress. Please wait.')],
-          flags: MessageFlags.Ephemeral,
-        });
-      }
-
       await interaction.deferUpdate();
-      pendingProvisionClaims.add(lock);
-      try {
+      if (admin) {
         const data = ServerProvision.ensureGuild(guildId);
         const panelSetup = data.panelSetup;
         if (!panelSetup) {
@@ -1122,160 +1678,104 @@ export async function handleServerInteraction(interaction, parts) {
             flags: MessageFlags.Ephemeral,
           });
         }
-        const provisionMode = getProvisionMode(data, panelSetup);
-        if (provisionMode === 'manual_admin') {
-          return interaction.followUp({
-            embeds: [errorEmbed('Invite reward claiming is disabled because this guild is in **Manual Admin Mode**.')],
-            flags: MessageFlags.Ephemeral,
-          });
-        }
-        const rewardPlan = getInviteRewardPlans(data, panelSetup).find((reward) => reward.id === selectedRewardId);
-        if (!rewardPlan) {
-          return interaction.followUp({
-            embeds: [errorEmbed('Selected reward plan was not found. Please try again.')],
-            flags: MessageFlags.Ephemeral,
-          });
-        }
-
-        const inviteCount = await fetchInviteCountForMember(interaction.guild, userId);
-        const eligibility = getRewardEligibility({
-          data,
-          panelSetup,
-          userId,
-          inviteCount,
-          reward: rewardPlan,
+        const nodes = getConfiguredNodes(panelSetup);
+        pendingAdminRewardSelections.set(setupKey(guildId, userId), {
+          rewardId: selectedRewardId,
+          expiresAt: Date.now() + 60_000,
         });
-        if (!eligibility.ok) {
-          const cooldownHint = eligibility.nextClaimAt > Date.now()
-            ? ` Try again in **${formatDuration(eligibility.nextClaimAt - Date.now())}**.`
-            : '';
-          return interaction.followUp({
-            embeds: [errorEmbed(`${eligibility.reason}${cooldownHint}`)],
-            flags: MessageFlags.Ephemeral,
-          });
-        }
-
-        const claim = ServerProvision.ensureUserClaim(guildId, userId);
-        const rewardClaim = getRewardClaimState(claim, rewardPlan.id);
-        const servers = ServerProvision.ensureUserServers(guildId, userId);
-        const cooldowns = ServerProvision.ensureUserCooldowns(guildId, userId);
-        const history = ServerProvision.ensureClaimHistory(guildId);
-        const idempotencyKey = `${guildId}:${userId}:${randomUUID()}`;
-        const endpoint = getPanelApiEndpoint(panelSetup, 'create');
-        if (!endpoint) {
-          return interaction.followUp({
-            embeds: [errorEmbed('Invalid panel API base URL in setup. Re-run setup and save again.')],
-            flags: MessageFlags.Ephemeral,
-          });
-        }
-
-        const payload = buildProvisionPayload(panelSetup, rewardPlan, interaction.user, idempotencyKey, inviteCount);
-        const provision = await callPanelApi(panelSetup, 'POST', endpoint, payload);
-        if (!provision.ok) {
-          return interaction.followUp({
-            embeds: [errorEmbed(`Failed to create server: ${provision.error}`)],
-            flags: MessageFlags.Ephemeral,
-          });
-        }
-
-        const createdAtIso = new Date().toISOString();
-        const panelServerId =
-          provision.data?.attributes?.id ||
-          provision.data?.id ||
-          provision.data?.server_id ||
-          idempotencyKey;
-        if (panelServerId === idempotencyKey) {
-          logger.warn('Panel API did not return a server ID; falling back to external ID key.');
-        }
-        const serverName = payload.name;
-        const record = {
-          id: idempotencyKey,
-          panelServerId: String(panelServerId),
-          name: serverName,
-          provider: panelSetup.provider,
-          rewardPlanId: rewardPlan.id,
-          rewardPlanName: rewardPlan.name,
-          status: 'active',
-          createdAt: createdAtIso,
-          inviteCountAtClaim: inviteCount,
-          createdBy: userId,
-        };
-        servers.push(record);
-        claim.claimed = true;
-        claim.claimCount = (claim.claimCount ?? 0) + 1;
-        claim.lastClaimAt = createdAtIso;
-        claim.lastInviteSnapshot = inviteCount;
-        claim.lastRewardId = rewardPlan.id;
-        if (!claim.rewardClaims || typeof claim.rewardClaims !== 'object') {
-          claim.rewardClaims = {};
-        }
-        claim.rewardClaims[rewardPlan.id] = {
-          claimCount: rewardClaim.claimCount + 1,
-          lastClaimAt: createdAtIso,
-          lastInviteSnapshot: inviteCount,
-        };
-        if (rewardPlan.cooldownHours > 0) {
-          setRewardCooldown(cooldowns, rewardPlan.id, Date.now() + hoursToMs(rewardPlan.cooldownHours));
-        } else {
-          setRewardCooldown(cooldowns, rewardPlan.id, 0);
-        }
-        history.push({
-          id: randomUUID(),
-          userId,
-          rewardPlanId: rewardPlan.id,
-          rewardPlanName: rewardPlan.name,
-          invitesAtClaim: inviteCount,
-          panelServerId: record.panelServerId,
-          createdAt: createdAtIso,
-          claimCountForReward: claim.rewardClaims[rewardPlan.id].claimCount,
-        });
-        ServerProvision.updateGuild(guildId, {
-          userClaims: data.userClaims,
-          createdServerRecords: data.createdServerRecords,
-          cooldowns: data.cooldowns,
-          claimHistory: data.claimHistory,
-        });
-
-        const detailEmbed = embed({
-          title: '✅ Server Created',
-          color: Colors.success,
-          description: 'Your invite reward server has been provisioned successfully.',
-          fields: [
-            { name: 'Reward Plan', value: `\`${rewardPlan.name}\``, inline: true },
-            { name: 'Server Name', value: `\`${serverName}\``, inline: true },
-            { name: 'Server ID', value: `\`${record.panelServerId}\``, inline: true },
-            { name: 'Provider', value: `\`${panelSetup.providerLabel ?? panelSetup.provider}\``, inline: true },
-            { name: 'Plan Claim Count', value: String(claim.rewardClaims[rewardPlan.id].claimCount), inline: true },
-            { name: 'Invites Used', value: String(inviteCount), inline: true },
-          ],
-        });
-
-        try {
-          await interaction.user.send({ embeds: [detailEmbed] });
-        } catch (err) {
-          logger.warn(`Could not DM server details to ${interaction.user.tag}: ${err?.message ?? 'unknown error'}`);
-        }
-        await interaction.followUp({ embeds: [detailEmbed], flags: MessageFlags.Ephemeral });
-
-        await sendAdminLog(interaction.guild, {
+        return interaction.followUp({
           embeds: [embed({
-            title: '🆕 Reward Server Provisioned',
+            title: '🧩 Select Provisioning Node',
             color: Colors.info,
-            fields: [
-              { name: 'User', value: `<@${userId}> (\`${userId}\`)`, inline: false },
-              { name: 'Reward Plan', value: `\`${rewardPlan.name}\` (\`${rewardPlan.id}\`)`, inline: false },
-              { name: 'Server ID', value: `\`${record.panelServerId}\``, inline: true },
-              { name: 'Server Name', value: `\`${record.name}\``, inline: true },
-              { name: 'Provider', value: `\`${record.provider}\``, inline: true },
-              { name: 'Invites', value: String(inviteCount), inline: true },
-              { name: 'Total Claims', value: String(claim.claimCount), inline: true },
-            ],
+            description: 'Choose **Automatic** to use the default node, or select a specific node for this provisioning request.',
           })],
+          components: [
+            new ActionRowBuilder().addComponents(
+              new StringSelectMenuBuilder()
+                .setCustomId('server:menu:reward_node_select')
+                .setPlaceholder('Select node mode')
+                .addOptions(buildNodeSelectOptions({ nodes, defaultNodeId: panelSetup.defaultNodeId }, true)),
+            ),
+          ],
+          flags: MessageFlags.Ephemeral,
         });
-        return;
-      } finally {
-        pendingProvisionClaims.delete(lock);
       }
+      return provisionRewardClaim(interaction, { selectedRewardId, selectedNodeId: 'auto' });
+    }
+
+    if (parts[2] === 'reward_node_select') {
+      await interaction.deferUpdate();
+      const pending = pendingAdminRewardSelections.get(setupKey(guildId, userId));
+      pendingAdminRewardSelections.delete(setupKey(guildId, userId));
+      if (!pending || pending.expiresAt < Date.now()) {
+        return interaction.followUp({
+          embeds: [errorEmbed('Reward provisioning selection expired. Start again from **Create Server**.')],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+      const selectedNodeId = interaction.values[0] ?? 'auto';
+      return provisionRewardClaim(interaction, {
+        selectedRewardId: pending.rewardId,
+        selectedNodeId,
+      });
+    }
+
+    if (parts[2] === 'wiz_node_edit_select') {
+      const session = getSession(guildId, userId);
+      if (!session || !admin) {
+        return interaction.reply({ embeds: [errorEmbed('Setup session expired or missing permissions.')], flags: MessageFlags.Ephemeral });
+      }
+      const node = (session.nodes ?? []).find((entry) => entry.id === interaction.values[0]);
+      if (!node) {
+        return interaction.reply({ embeds: [errorEmbed('Selected node was not found in this setup session.')], flags: MessageFlags.Ephemeral });
+      }
+      const modal = new ModalBuilder().setCustomId(`server:modal:wiz_node_edit:${node.id}`).setTitle('Edit Panel Node');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel('Node Name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(node.name)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('location').setLabel('Location').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(node.location)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('panelid').setLabel('Panel Node ID').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(node.panelNodeId)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('limits').setLabel('Available RAM,CPU,Disk').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(40).setValue(`${node.available.ramMb},${node.available.cpuPercent},${node.available.diskMb}`)),
+      );
+      return interaction.showModal(modal);
+    }
+
+    if (parts[2] === 'wiz_node_remove_select') {
+      const session = getSession(guildId, userId);
+      if (!session || !admin) {
+        return interaction.reply({ embeds: [errorEmbed('Setup session expired or missing permissions.')], flags: MessageFlags.Ephemeral });
+      }
+      const nodeId = interaction.values[0];
+      session.nodes = (session.nodes ?? []).filter((node) => node.id !== nodeId);
+      if (session.defaultNodeId === nodeId) {
+        session.defaultNodeId = session.nodes[0]?.id ?? null;
+      }
+      await interaction.deferUpdate();
+      return interaction.followUp({
+        embeds: [embed({ title: '✅ Node Removed', color: Colors.success, description: `Removed node \`${nodeId}\` from this setup session.` })],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    if (parts[2] === 'wiz_node_default_select') {
+      const session = getSession(guildId, userId);
+      if (!session || !admin) {
+        return interaction.reply({ embeds: [errorEmbed('Setup session expired or missing permissions.')], flags: MessageFlags.Ephemeral });
+      }
+      const nodeId = interaction.values[0];
+      if (!(session.nodes ?? []).some((node) => node.id === nodeId)) {
+        return interaction.reply({ embeds: [errorEmbed('Selected node was not found in this setup session.')], flags: MessageFlags.Ephemeral });
+      }
+      session.defaultNodeId = nodeId;
+      const node = session.nodes.find((entry) => entry.id === nodeId);
+      if (node) {
+        session.nodeLocation = node.location;
+        session.limits = normalizeNodeLimits(node.available, session.limits);
+      }
+      await interaction.deferUpdate();
+      return interaction.followUp({
+        embeds: [embed({ title: '✅ Default Node Updated', color: Colors.success, description: `Default node is now \`${nodeId}\`.` })],
+        flags: MessageFlags.Ephemeral,
+      });
     }
 
     if (parts[2] === 'mode_select') {
@@ -1306,6 +1806,129 @@ export async function handleServerInteraction(interaction, parts) {
   if (interaction.isModalSubmit()) {
     if (type !== 'modal') return;
     const field = parts[2];
+
+    if (field === 'wiz_node_add' || field === 'wiz_node_edit' || field === 'wiz_reward_node_assign') {
+      const session = getSession(guildId, userId);
+      if (!session) {
+        return interaction.reply({ embeds: [errorEmbed('Setup session expired. Click **Setup Panel** again.')], flags: MessageFlags.Ephemeral });
+      }
+      if (!admin) {
+        return interaction.reply({ embeds: [errorEmbed('Only administrators can modify setup.')], flags: MessageFlags.Ephemeral });
+      }
+
+      if (field === 'wiz_reward_node_assign') {
+        const rewardId = interaction.fields.getTextInputValue('rewardid').trim().slice(0, 80);
+        const nodeId = interaction.fields.getTextInputValue('nodeid').trim().slice(0, 80);
+        if (!rewardId) {
+          return interaction.reply({ embeds: [errorEmbed('Reward plan ID is required.')], flags: MessageFlags.Ephemeral });
+        }
+        const data = ServerProvision.ensureGuild(guildId);
+        const rewards = Array.isArray(data.inviteRewards) ? data.inviteRewards : [];
+        let targetReward = rewards.find((reward) => reward.id === rewardId);
+        if (!targetReward && rewardId === 'legacy-default') {
+          const legacyReward = getInviteRewardPlans(data, data.panelSetup).find((reward) => reward.id === 'legacy-default');
+          if (legacyReward) {
+            targetReward = {
+              ...legacyReward,
+              createdAt: legacyReward.createdAt ?? new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            rewards.push(targetReward);
+          }
+        }
+        if (!targetReward) {
+          return interaction.reply({ embeds: [errorEmbed(`Reward plan \`${rewardId}\` was not found in configured invite rewards.`)], flags: MessageFlags.Ephemeral });
+        }
+        if (nodeId) {
+          const node = (session.nodes ?? []).find((entry) => entry.id === nodeId);
+          if (!node) {
+            return interaction.reply({ embeds: [errorEmbed(`Node \`${nodeId}\` is not configured in this setup session.`)], flags: MessageFlags.Ephemeral });
+          }
+          targetReward.nodeId = node.id;
+          targetReward.nodeLocation = node.location;
+        } else {
+          delete targetReward.nodeId;
+          delete targetReward.nodeLocation;
+        }
+        targetReward.updatedAt = new Date().toISOString();
+        ServerProvision.updateGuild(guildId, { inviteRewards: rewards });
+        return interaction.reply({
+          embeds: [embed({
+            title: '✅ Reward Plan Node Updated',
+            color: Colors.success,
+            description: nodeId
+              ? `Reward \`${rewardId}\` now targets node \`${nodeId}\`.`
+              : `Reward \`${rewardId}\` now uses automatic/default node selection.`,
+          })],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      const name = interaction.fields.getTextInputValue('name').trim().slice(0, 80);
+      const location = interaction.fields.getTextInputValue('location').trim().slice(0, 80);
+      const panelNodeId = interaction.fields.getTextInputValue('panelid').trim().slice(0, 80);
+      const limitsRaw = interaction.fields.getTextInputValue('limits').trim();
+      const [ramRaw, cpuRaw, diskRaw] = limitsRaw.split(',').map((part) => part.trim());
+      const ramMb = parseNonNegativeInt(ramRaw);
+      const cpuPercent = parseNonNegativeInt(cpuRaw);
+      const diskMb = parseNonNegativeInt(diskRaw);
+      if (!name || !location || !panelNodeId) {
+        return interaction.reply({ embeds: [errorEmbed('Node name, location, and panel node ID are required.')], flags: MessageFlags.Ephemeral });
+      }
+      if (
+        !ramRaw || !cpuRaw || !diskRaw ||
+        !Number.isFinite(ramMb) || !Number.isFinite(cpuPercent) || !Number.isFinite(diskMb) ||
+        ramMb <= 0 || cpuPercent <= 0 || diskMb <= 0
+      ) {
+        return interaction.reply({
+          embeds: [errorEmbed('Invalid limits format. Use `RAM,CPU,Disk` with values greater than 0.')],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      const nowIso = new Date().toISOString();
+      if (field === 'wiz_node_add') {
+        const newNode = {
+          id: randomUUID(),
+          name,
+          location,
+          panelNodeId,
+          available: { ramMb, cpuPercent, diskMb },
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        };
+        if (!Array.isArray(session.nodes)) session.nodes = [];
+        session.nodes.push(newNode);
+        if (!session.defaultNodeId) session.defaultNodeId = newNode.id;
+        return interaction.reply({
+          embeds: [embed({
+            title: '✅ Node Added',
+            color: Colors.success,
+            description: `Added node **${newNode.name}** (\`${newNode.id}\`).`,
+          })],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      const editNodeId = parts[3];
+      const node = (session.nodes ?? []).find((entry) => entry.id === editNodeId);
+      if (!node) {
+        return interaction.reply({ embeds: [errorEmbed('Node to edit was not found in this setup session.')], flags: MessageFlags.Ephemeral });
+      }
+      node.name = name;
+      node.location = location;
+      node.panelNodeId = panelNodeId;
+      node.available = { ramMb, cpuPercent, diskMb };
+      node.updatedAt = nowIso;
+      if (session.defaultNodeId === node.id) {
+        session.nodeLocation = node.location;
+        session.limits = normalizeNodeLimits(node.available, session.limits);
+      }
+      return interaction.reply({
+        embeds: [embed({ title: '✅ Node Updated', color: Colors.success, description: `Updated node \`${node.id}\`.` })],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
 
     if (field === 'admin_reset' || field === 'admin_suspend' || field === 'admin_delete' || field === 'admin_user_servers' || field === 'admin_manual_create') {
       if (!admin) {
@@ -1371,7 +1994,15 @@ export async function handleServerInteraction(interaction, parts) {
           });
         }
 
-        const nodeLocation = interaction.fields.getTextInputValue('node').trim().slice(0, 80) || panelSetup.nodeLocation;
+        const nodeSelector = interaction.fields.getTextInputValue('node').trim().slice(0, 80);
+        const resolvedNode = await resolveProvisionNode(guildId, panelSetup, { nodeId: nodeSelector || 'auto' });
+        if (!resolvedNode.ok) {
+          return interaction.reply({
+            embeds: [errorEmbed(resolvedNode.error)],
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+        const nodeLocation = resolvedNode.node.location;
         const eggTemplate = interaction.fields.getTextInputValue('egg').trim().slice(0, 80) || panelSetup.eggTemplate;
         if (!nodeLocation || !eggTemplate) {
           return interaction.reply({
@@ -1379,9 +2010,9 @@ export async function handleServerInteraction(interaction, parts) {
             flags: MessageFlags.Ephemeral,
           });
         }
-        if (!isSafeProvisionIdentifier(nodeLocation) || !isSafeProvisionIdentifier(eggTemplate)) {
+        if (!isSafeProvisionIdentifier(eggTemplate)) {
           return interaction.reply({
-            embeds: [errorEmbed('Node/Location and Egg/Template can only contain letters, numbers, `.`, `_`, `:`, and `-`.')],
+            embeds: [errorEmbed('Egg/Template can only contain letters, numbers, `.`, `_`, `:`, and `-`.')],
             flags: MessageFlags.Ephemeral,
           });
         }
@@ -1396,7 +2027,7 @@ export async function handleServerInteraction(interaction, parts) {
         const idempotencyKey = `${guildId}:${targetUserId}:${randomUUID()}`;
         const payload = buildProvisionPayload(panelSetup, null, targetUser, idempotencyKey, 0, {
           source: 'manual_admin',
-          nodeLocation,
+          resolvedNode: resolvedNode.node,
           eggTemplate,
           limits: { ramMb, cpuPercent, diskMb },
           provisionedBy: userId,
@@ -1431,6 +2062,8 @@ export async function handleServerInteraction(interaction, parts) {
           createdBy: userId,
           createdFor: targetUserId,
           source: 'manual_admin',
+          nodeId: resolvedNode.node.id,
+          panelNodeId: resolvedNode.node.panelNodeId,
           nodeLocation,
           eggTemplate,
           limits: { ramMb, cpuPercent, diskMb },
@@ -1450,7 +2083,7 @@ export async function handleServerInteraction(interaction, parts) {
               { name: 'Server ID', value: `\`${record.panelServerId}\``, inline: true },
               { name: 'Server Name', value: `\`${record.name}\``, inline: true },
               { name: 'Provisioned By', value: `<@${userId}>`, inline: true },
-              { name: 'Node / Egg', value: `\`${nodeLocation}\` / \`${eggTemplate}\``, inline: false },
+              { name: 'Node / Egg', value: `\`${resolvedNode.node.name}\` (\`${resolvedNode.node.id}\`) / \`${eggTemplate}\``, inline: false },
               { name: 'Limits', value: `\`${ramMb}MB / ${cpuPercent}% / ${diskMb}MB\``, inline: false },
             ],
           })],
@@ -1462,7 +2095,7 @@ export async function handleServerInteraction(interaction, parts) {
             color: Colors.success,
             description: `Created server \`${record.panelServerId}\` for <@${targetUserId}>.`,
             fields: [
-              { name: 'Node / Egg', value: `\`${nodeLocation}\` / \`${eggTemplate}\``, inline: false },
+              { name: 'Node / Egg', value: `\`${resolvedNode.node.name}\` (\`${resolvedNode.node.id}\`) / \`${eggTemplate}\``, inline: false },
               { name: 'Limits', value: `\`${ramMb}MB / ${cpuPercent}% / ${diskMb}MB\``, inline: false },
             ],
           })],
@@ -1595,6 +2228,7 @@ export async function handleServerInteraction(interaction, parts) {
 
     if (field === 'node') {
       session.nodeLocation = interaction.fields.getTextInputValue('value').trim().slice(0, 80);
+      upsertLegacyNodeInSession(session);
       session.step = 5;
       return interaction.reply({ ...setupPayload(session), flags: MessageFlags.Ephemeral });
     }
@@ -1613,6 +2247,7 @@ export async function handleServerInteraction(interaction, parts) {
         return interaction.reply({ embeds: [errorEmbed('RAM, CPU, and Disk must be greater than 0.')], flags: MessageFlags.Ephemeral });
       }
       session.limits = { ramMb, cpuPercent, diskMb };
+      upsertLegacyNodeInSession(session);
       session.step = 7;
       return interaction.reply({ ...setupPayload(session), flags: MessageFlags.Ephemeral });
     }
