@@ -145,9 +145,11 @@ export default {
       .map((entry) => `• ${entry.reward.name}: **${entry.claim.claimCount}/${entry.reward.maxClaims}**`)
       .join('\n') || 'No rewards claimed yet.';
 
-    const minRemaining = rewards.reduce((acc, reward) => (
-      Math.min(acc, Math.max(0, reward.invitesRequired - inviteCount))
-    ), Number.POSITIVE_INFINITY);
+    const minRemaining = rewards.length === 0
+      ? 0
+      : rewards.reduce((acc, reward) => (
+        Math.min(acc, Math.max(0, reward.invitesRequired - inviteCount))
+      ), Number.POSITIVE_INFINITY);
 
     return interaction.reply({
       embeds: [embed({
@@ -155,7 +157,7 @@ export default {
         color: Colors.primary,
         fields: [
           { name: 'Current Invites', value: String(inviteCount), inline: true },
-          { name: 'Remaining Invites Needed', value: Number.isFinite(minRemaining) ? String(minRemaining) : '0', inline: true },
+          { name: 'Remaining Invites Needed', value: String(minRemaining), inline: true },
           { name: 'Claimed Rewards', value: claimedRewards, inline: false },
           { name: 'Available Server Rewards', value: lines.join('\n') || 'No reward plans configured yet.', inline: false },
         ],

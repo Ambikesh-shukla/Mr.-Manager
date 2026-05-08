@@ -1,3 +1,5 @@
+import { logger } from './logger.js';
+
 const DEFAULT_LIMITS = { ramMb: 4096, cpuPercent: 100, diskMb: 10240 };
 
 function toNonNegativeInt(value, fallback = 0) {
@@ -104,7 +106,8 @@ export async function fetchInviteCountForMember(guild, userId) {
   try {
     const invites = await guild.invites.fetch();
     return getUserInviteCount(invites, userId);
-  } catch {
+  } catch (err) {
+    logger.warn(`Failed to fetch invites for guild ${guild?.id ?? 'unknown'} user ${userId}: ${err?.message ?? 'unknown error'}`);
     return 0;
   }
 }

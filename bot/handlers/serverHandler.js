@@ -674,6 +674,7 @@ export async function handleServerInteraction(interaction, parts) {
         });
       }
 
+      // Discord select menus allow up to 25 options.
       const options = eligibleRewards.slice(0, 25).map((reward) => ({
         label: reward.name.slice(0, 100),
         value: reward.id,
@@ -1149,10 +1150,9 @@ export async function handleServerInteraction(interaction, parts) {
           rewardClaims: {},
         };
         if (cooldowns[targetUserId]) {
-          for (const key of Object.keys(cooldowns[targetUserId])) {
-            if (key.startsWith('reward:') || key === 'nextClaimAt') {
-              delete cooldowns[targetUserId][key];
-            }
+          const keysToDelete = Object.keys(cooldowns[targetUserId]).filter((key) => key.startsWith('reward:') || key === 'nextClaimAt');
+          for (const key of keysToDelete) {
+            delete cooldowns[targetUserId][key];
           }
         }
         ServerProvision.updateGuild(guildId, { userClaims: claims, cooldowns });
