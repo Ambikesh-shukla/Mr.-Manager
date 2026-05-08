@@ -34,7 +34,9 @@ export async function connectMongo() {
     })().catch(async (error) => {
       try {
         await mongoClient?.close();
-      } catch {}
+      } catch (closeErr) {
+        console.warn('Failed to close MongoDB client after error', closeErr);
+      }
       connectPromise = null;
       mongoClient = undefined;
       mongoDb = undefined;
@@ -46,6 +48,9 @@ export async function connectMongo() {
 }
 
 export function getDb() {
+  if (connectPromise && !mongoDb) {
+    throw new Error('MongoDB connection is in progress. Await connectMongo() before calling getDb().');
+  }
   if (!mongoDb) {
     throw new Error('MongoDB is not connected. Call connectMongo() first.');
   }
