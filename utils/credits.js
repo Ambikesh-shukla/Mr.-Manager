@@ -45,13 +45,13 @@ export async function deductCredit(guildId, actionKey, cost = 1) {
     }
 
     // Atomic decrement guarded by credit balance.
-    const updated = await db.collection(GUILDS).findOneAndUpdate(
+    const updatedDoc = await db.collection(GUILDS).findOneAndUpdate(
       { guildId, credits: { $gte: cost } },
       { $inc: { credits: -cost }, $set: { updatedAt: new Date() } },
       { returnDocument: 'after' },
     );
 
-    if (!updated) {
+    if (!updatedDoc) {
       return { ok: false, reason: 'insufficient_credits' };
     }
 
