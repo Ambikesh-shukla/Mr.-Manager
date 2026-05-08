@@ -115,6 +115,10 @@ function parseNonNegativeInt(raw, fallback = 0) {
   return Math.max(0, n);
 }
 
+function isSafeProvisionIdentifier(value) {
+  return /^[A-Za-z0-9._:-]+$/.test(value);
+}
+
 function getSecretKey() {
   const secret = process.env.SERVER_PANEL_SECRET?.trim();
   if (!secret) return null;
@@ -1356,7 +1360,11 @@ export async function handleServerInteraction(interaction, parts) {
         const ramMb = parseNonNegativeInt(ramRaw);
         const cpuPercent = parseNonNegativeInt(cpuRaw);
         const diskMb = parseNonNegativeInt(diskRaw);
-        if (!ramRaw || !cpuRaw || !diskRaw || ramMb <= 0 || cpuPercent <= 0 || diskMb <= 0) {
+        if (
+          !ramRaw || !cpuRaw || !diskRaw ||
+          !Number.isFinite(ramMb) || !Number.isFinite(cpuPercent) || !Number.isFinite(diskMb) ||
+          ramMb <= 0 || cpuPercent <= 0 || diskMb <= 0
+        ) {
           return interaction.reply({
             embeds: [errorEmbed('Invalid limits format. Use `RAM,CPU,Disk` with values greater than 0.')],
             flags: MessageFlags.Ephemeral,
@@ -1368,6 +1376,12 @@ export async function handleServerInteraction(interaction, parts) {
         if (!nodeLocation || !eggTemplate) {
           return interaction.reply({
             embeds: [errorEmbed('Node/Location and Egg/Template are required (either set in setup or provided here).')],
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+        if (!isSafeProvisionIdentifier(nodeLocation) || !isSafeProvisionIdentifier(eggTemplate)) {
+          return interaction.reply({
+            embeds: [errorEmbed('Node/Location and Egg/Template can only contain letters, numbers, `.`, `_`, `:`, and `-`.')],
             flags: MessageFlags.Ephemeral,
           });
         }
