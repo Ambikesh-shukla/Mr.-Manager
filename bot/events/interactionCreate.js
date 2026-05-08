@@ -2,6 +2,9 @@ import { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, Butto
 import { shouldHandleInteraction } from "../../utils/instanceRouter.js";
 import { logger } from '../utils/logger.js';
 import { errorEmbed } from '../utils/embeds.js';
+import { getBillingDecision } from '../../utils/actionKey.js';
+import { safeReply } from '../../utils/safeReply.js';
+import { deductCredit, refundCredit } from '../../utils/credits.js';
 import { checkPermission, COMMAND_DEFAULTS } from '../utils/permissions.js';
 import {
   handlePanelButton, handlePanelSelect,
@@ -28,6 +31,42 @@ import { handleWelcomeInteraction } from '../handlers/welcomeHandler.js';
 import { handleLinkInteraction } from '../handlers/linkHandler.js';
 import { handleServerInteraction } from '../handlers/serverHandler.js';
 import { handlePostEmbedButton } from '../handlers/postHandler.js';
+
+const NO_CREDITS_MSG = '❌ This server does not have enough credits. Use `/credits` or `/redeem`.';
+
+/**
+ * Billing middleware: checks credits, deducts before executing the action,
+ * and refunds if the action throws.  Free actions (cost=0) and DM interactions
+ * are always passed through without any DB calls.
+ *
+ * @param {import('discord.js').Interaction} interaction
+ * @param {() => Promise<unknown>} fn - The interaction handler to execute.
+ */
+async function withBilling(interaction, fn) {
+  const { shouldCharge, actionKey, cost } = getBillingDecision(interaction);
+
+  if (!shouldCharge || !interaction.inGuild?.()) {
+    return fn();
+  }
+
+  const guildId = interaction.guildId;
+  const result = await deductCredit(guildId, actionKey, cost);
+
+  if (!result.ok) {
+    return safeReply(interaction, {
+      embeds: [errorEmbed(NO_CREDITS_MSG)],
+      flags: 64,
+    });
+  }
+
+  try {
+    return await fn();
+  } catch (err) {
+    await refundCredit(guildId, actionKey, cost);
+    logger.warn(`[BILLING] Refunded ${cost} credit(s) for "${actionKey}" after action failure in guild ${guildId}`);
+    throw err;
+  }
+}
 
 export default {
   name: 'interactionCreate',
@@ -79,7 +118,7 @@ export default {
         }
 
         logger.info(`Command: /${interaction.commandName} by ${interaction.user.tag}`);
-        await cmd.execute(interaction, client);
+        await withBilling(interaction, () => cmd.execute(interaction, client));
         return;
       }
 
@@ -97,6 +136,7 @@ export default {
 
         logger.info(`Button: ${interaction.customId} by ${interaction.user.tag}`);
 
+        return withBilling(interaction, async () => {
         if (ns === 'setup') {
           if (action === 'btn') return handleSetupButton(interaction, parts.slice(2).join(':'));
           if (action === 'dash') return handleSetupDashButton(interaction, parts.slice(2).join(':'));
@@ -228,7 +268,7 @@ export default {
           }
         }
 
-        return;
+        });
       }
 
       // ── Select Menus ───────────────────────────────────────────────────────
@@ -236,6 +276,7 @@ export default {
         const parts = interaction.customId.split(':');
         const ns = parts[0], action = parts[1];
 
+        return withBilling(interaction, async () => {
         if (ns === 'setup') {
           if (action === 'menu') return handleSetupMenu(interaction);
           if (action === 'typeselect') return handleSetupTypeSelect(interaction);
@@ -247,7 +288,7 @@ export default {
         if (ns === 'panelselect') return handlePanelSelect(interaction, action);
         if (ns === 'ticketpriority_set') return handlePrioritySet(interaction, action);
         if (ns === 'noop') return interaction.deferUpdate();
-        return;
+        });
       }
 
       // ── Channel Selects ────────────────────────────────────────────────────
@@ -277,6 +318,7 @@ export default {
         const parts = interaction.customId.split(':');
         const ns = parts[0], action = parts[1];
 
+        return withBilling(interaction, async () => {
         if (ns === 'setup' && action === 'modal') return handleSetupModal(interaction, parts.slice(2).join(':'));
         if (ns === 'welcome') return handleWelcomeInteraction(interaction, parts);
         if (ns === 'server') return handleServerInteraction(interaction, parts);
@@ -344,7 +386,7 @@ export default {
           }
           return interaction.reply({ embeds: [successEmbed('Review Submitted', 'Your review has been posted. Thank you! 🙏')], flags: 64 });
         }
-        return;
+        });
       }
 
     } catch (err) {
