@@ -23,6 +23,7 @@ export const COMMAND_DEFAULTS = {
   ping: 'public',
   serverinfo: 'public',
   server: 'public',
+  invite: 'public',
   afk: 'public',
   purge: 'admin',
 };
