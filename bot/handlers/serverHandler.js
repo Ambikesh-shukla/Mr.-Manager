@@ -14,6 +14,13 @@ import { embed, Colors, errorEmbed } from '../utils/embeds.js';
 import { isAdmin } from '../utils/permissions.js';
 import { GuildConfig } from '../storage/GuildConfig.js';
 import { logger } from '../utils/logger.js';
+import {
+  fetchInviteCountForMember,
+  getInviteRewardPlans,
+  getRewardEligibility,
+  getRewardClaimState,
+  setRewardCooldown,
+} from '../utils/inviteRewards.js';
 
 const setupSessions = new Map();
 const pendingProvisionClaims = new Set();
@@ -164,44 +171,14 @@ function renderServerName(format, user) {
     .slice(0, 64);
 }
 
-function getUserInviteCount(invites, userId) {
-  let total = 0;
-  for (const inv of invites.values()) {
-    if (inv.inviter?.id !== userId) continue;
-    if (!Number.isFinite(inv.uses)) continue;
-    total += inv.uses;
-  }
-  return total;
-}
-
-async function fetchInviteCountForMember(guild, userId) {
-  try {
-    const invites = await guild.invites.fetch();
-    return getUserInviteCount(invites, userId);
-  } catch {
-    return 0;
-  }
-}
-
-function getEligibilityState(data, panelSetup, userId, inviteCount) {
-  const requirement = Math.max(0, Number(panelSetup?.inviteRequirement ?? data.inviteRequirement ?? 0) || 0);
-  const maxServersPerUser = Math.max(1, Number(panelSetup?.maxServersPerUser) || 1);
-  const cooldownHours = Math.max(0, Number(panelSetup?.cooldownHours ?? 0) || 0);
-  const servers = Array.isArray(data.createdServerRecords?.[userId]) ? data.createdServerRecords[userId] : [];
-  const cooldownRef = data.cooldowns?.[userId] ?? {};
-  const nextClaimAt = Number(cooldownRef.nextClaimAt) || 0;
-  const now = Date.now();
-
-  if (inviteCount < requirement) {
-    return { ok: false, reason: `You need **${requirement}** invites to claim this reward. You currently have **${inviteCount}**.` };
-  }
-  if (servers.length >= maxServersPerUser) {
-    return { ok: false, reason: `You have reached the max limit (**${maxServersPerUser}**) of reward servers.` };
-  }
-  if (nextClaimAt > now) {
-    return { ok: false, reason: `You are on cooldown. Try again in **${formatDuration(nextClaimAt - now)}**.` };
-  }
-  return { ok: true, requirement, maxServersPerUser, cooldownHours };
+function formatRewardLine(reward, inviteCount, data, panelSetup, userId) {
+  const eligibility = getRewardEligibility({ data, panelSetup, userId, inviteCount, reward });
+  const cooldownText = eligibility.nextClaimAt > Date.now()
+    ? ` • cooldown: ${formatDuration(eligibility.nextClaimAt - Date.now())}`
+    : '';
+  const remaining = eligibility.remainingInvites > 0 ? ` • need ${eligibility.remainingInvites} more invites` : '';
+  const status = eligibility.ok ? '✅ Eligible' : '❌ Not eligible';
+  return `• **${reward.name}** (\`${reward.id}\`) — ${reward.invitesRequired} invites, ${reward.limits.ramMb}MB RAM, ${reward.limits.cpuPercent}% CPU, ${reward.limits.diskMb}MB Disk, claims ${eligibility.rewardClaim.claimCount}/${reward.maxClaims}${remaining}${cooldownText} • ${status}`;
 }
 
 function getPanelApiEndpoint(panelSetup, kind, serverId = null) {
@@ -227,8 +204,11 @@ function getPanelApiEndpoint(panelSetup, kind, serverId = null) {
   return null;
 }
 
-function buildProvisionPayload(panelSetup, user, idempotencyKey, inviteCount) {
+function buildProvisionPayload(panelSetup, rewardPlan, user, idempotencyKey, inviteCount) {
   const serverName = renderServerName(panelSetup.serverNameFormat, user);
+  const effectiveNode = rewardPlan?.nodeLocation || panelSetup.nodeLocation;
+  const effectiveEgg = rewardPlan?.eggTemplate || panelSetup.eggTemplate;
+  const effectiveLimits = rewardPlan?.limits ?? panelSetup.limits ?? {};
   return {
     external_id: idempotencyKey,
     name: serverName,
@@ -240,14 +220,15 @@ function buildProvisionPayload(panelSetup, user, idempotencyKey, inviteCount) {
     metadata: {
       source: 'invite_reward',
       invite_count: inviteCount,
+      reward_plan_id: rewardPlan?.id ?? 'unknown',
       provider: panelSetup.provider,
-      egg_template: panelSetup.eggTemplate,
-      node_location: panelSetup.nodeLocation,
+      egg_template: effectiveEgg,
+      node_location: effectiveNode,
     },
     limits: {
-      memory: panelSetup.limits?.ramMb ?? 4096,
-      cpu: panelSetup.limits?.cpuPercent ?? 100,
-      disk: panelSetup.limits?.diskMb ?? 10240,
+      memory: effectiveLimits.ramMb ?? 4096,
+      cpu: effectiveLimits.cpuPercent ?? 100,
+      disk: effectiveLimits.diskMb ?? 10240,
     },
   };
 }
@@ -534,6 +515,7 @@ function buildDashboard(guildId, userId, isUserAdmin) {
   const userServers = data.createdServerRecords?.[userId] ?? [];
   const userClaim = data.userClaims?.[userId] ?? null;
   const panelSetup = data.panelSetup ?? null;
+  const rewardPlans = getInviteRewardPlans(data, panelSetup);
 
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -580,7 +562,7 @@ function buildDashboard(guildId, userId, isUserAdmin) {
             : 'Not configured',
           inline: true,
         },
-        { name: 'Invite Requirement', value: String(panelSetup?.inviteRequirement ?? data.inviteRequirement), inline: true },
+        { name: 'Reward Plans', value: String(rewardPlans.length), inline: true },
         { name: 'My Claims', value: userClaim ? `Used: ${userClaim.claimCount ?? 0}` : 'None yet', inline: true },
         { name: 'My Servers', value: String(userServers.length), inline: true },
       ],
@@ -655,127 +637,67 @@ export async function handleServerInteraction(interaction, parts) {
     }
 
     if (action === 'create') {
-      const lock = claimLockKey(guildId, userId);
-      if (pendingProvisionClaims.has(lock)) {
-        return interaction.reply({
-          embeds: [errorEmbed('A provisioning request for you is already in progress. Please wait.')],
+      await interaction.deferUpdate();
+      const data = ServerProvision.ensureGuild(guildId);
+      const panelSetup = data.panelSetup;
+      if (!panelSetup) {
+        return interaction.followUp({
+          embeds: [errorEmbed('Panel setup is not configured yet. Ask an admin to run **Setup Panel** first.')],
           flags: MessageFlags.Ephemeral,
         });
       }
 
-      await interaction.deferUpdate();
-      pendingProvisionClaims.add(lock);
-      try {
-        const data = ServerProvision.ensureGuild(guildId);
-        const panelSetup = data.panelSetup;
-        if (!panelSetup) {
-          return interaction.followUp({
-            embeds: [errorEmbed('Panel setup is not configured yet. Ask an admin to run **Setup Panel** first.')],
-            flags: MessageFlags.Ephemeral,
-          });
-        }
+      const inviteCount = await fetchInviteCountForMember(interaction.guild, userId);
+      const rewards = getInviteRewardPlans(data, panelSetup);
+      const eligibleRewards = rewards.filter((reward) => getRewardEligibility({
+        data,
+        panelSetup,
+        userId,
+        inviteCount,
+        reward,
+      }).ok);
 
-        const inviteCount = await fetchInviteCountForMember(interaction.guild, userId);
-        const eligibility = getEligibilityState(data, panelSetup, userId, inviteCount);
-        if (!eligibility.ok) {
-          return interaction.followUp({ embeds: [errorEmbed(eligibility.reason)], flags: MessageFlags.Ephemeral });
-        }
-
-        const claim = ServerProvision.ensureUserClaim(guildId, userId);
-        const servers = ServerProvision.ensureUserServers(guildId, userId);
-        const cooldowns = ServerProvision.ensureUserCooldowns(guildId, userId);
-        const idempotencyKey = `${guildId}:${userId}:${randomUUID()}`;
-        const endpoint = getPanelApiEndpoint(panelSetup, 'create');
-        if (!endpoint) {
-          return interaction.followUp({
-            embeds: [errorEmbed('Invalid panel API base URL in setup. Re-run setup and save again.')],
-            flags: MessageFlags.Ephemeral,
-          });
-        }
-
-        const payload = buildProvisionPayload(panelSetup, interaction.user, idempotencyKey, inviteCount);
-        const provision = await callPanelApi(panelSetup, 'POST', endpoint, payload);
-        if (!provision.ok) {
-          return interaction.followUp({
-            embeds: [errorEmbed(`Failed to create server: ${provision.error}`)],
-            flags: MessageFlags.Ephemeral,
-          });
-        }
-
-        const createdAtIso = new Date().toISOString();
-        const panelServerId =
-          provision.data?.attributes?.id ||
-          provision.data?.id ||
-          provision.data?.server_id ||
-          idempotencyKey;
-        if (panelServerId === idempotencyKey) {
-          logger.warn('Panel API did not return a server ID; falling back to external ID key.');
-        }
-        const serverName = payload.name;
-        const record = {
-          id: idempotencyKey,
-          panelServerId: String(panelServerId),
-          name: serverName,
-          provider: panelSetup.provider,
-          status: 'active',
-          createdAt: createdAtIso,
-          inviteCountAtClaim: inviteCount,
-          createdBy: userId,
-        };
-        servers.push(record);
-        claim.claimed = true;
-        claim.claimCount = (claim.claimCount ?? 0) + 1;
-        claim.lastClaimAt = createdAtIso;
-        claim.lastInviteSnapshot = inviteCount;
-        if (eligibility.cooldownHours > 0) {
-          cooldowns.nextClaimAt = Date.now() + hoursToMs(eligibility.cooldownHours);
-        } else {
-          delete cooldowns.nextClaimAt;
-        }
-        ServerProvision.updateGuild(guildId, {
-          userClaims: data.userClaims,
-          createdServerRecords: data.createdServerRecords,
-          cooldowns: data.cooldowns,
-        });
-
-        const detailEmbed = embed({
-          title: '✅ Server Created',
-          color: Colors.success,
-          description: 'Your invite reward server has been provisioned successfully.',
-          fields: [
-            { name: 'Server Name', value: `\`${serverName}\``, inline: true },
-            { name: 'Server ID', value: `\`${record.panelServerId}\``, inline: true },
-            { name: 'Provider', value: `\`${panelSetup.providerLabel ?? panelSetup.provider}\``, inline: true },
-            { name: 'Claim Count', value: String(claim.claimCount), inline: true },
-            { name: 'Invites Used', value: String(inviteCount), inline: true },
-          ],
-        });
-
-        try {
-          await interaction.user.send({ embeds: [detailEmbed] });
-        } catch (err) {
-          logger.warn(`Could not DM server details to ${interaction.user.tag}: ${err?.message ?? 'unknown error'}`);
-        }
-        await interaction.followUp({ embeds: [detailEmbed], flags: MessageFlags.Ephemeral });
-
-        await sendAdminLog(interaction.guild, {
+      if (eligibleRewards.length === 0) {
+        const top = rewards.slice(0, 8).map((reward) => formatRewardLine(reward, inviteCount, data, panelSetup, userId)).join('\n');
+        return interaction.followUp({
           embeds: [embed({
-            title: '🆕 Reward Server Provisioned',
-            color: Colors.info,
+            title: '🎁 Invite Reward Plans',
+            color: Colors.warning,
+            description: 'No reward plan is currently claimable for your account.',
             fields: [
-              { name: 'User', value: `<@${userId}> (\`${userId}\`)`, inline: false },
-              { name: 'Server ID', value: `\`${record.panelServerId}\``, inline: true },
-              { name: 'Server Name', value: `\`${record.name}\``, inline: true },
-              { name: 'Provider', value: `\`${record.provider}\``, inline: true },
-              { name: 'Invites', value: String(inviteCount), inline: true },
-              { name: 'Claim Count', value: String(claim.claimCount), inline: true },
+              { name: 'Your Invites', value: String(inviteCount), inline: true },
+              { name: 'Plans', value: top || 'No plans configured yet.', inline: false },
             ],
           })],
+          flags: MessageFlags.Ephemeral,
         });
-        return;
-      } finally {
-        pendingProvisionClaims.delete(lock);
       }
+
+      const options = eligibleRewards.slice(0, 25).map((reward) => ({
+        label: reward.name.slice(0, 100),
+        value: reward.id,
+        description: `${reward.invitesRequired} invites • ${reward.limits.ramMb}MB RAM • ${reward.maxClaims} max claims`.slice(0, 100),
+      }));
+      return interaction.followUp({
+        embeds: [embed({
+          title: '🧩 Select Reward Plan',
+          color: Colors.info,
+          description: 'Only plans you can currently claim are shown below.',
+          fields: [
+            { name: 'Your Invites', value: String(inviteCount), inline: true },
+            { name: 'Eligible Plans', value: String(eligibleRewards.length), inline: true },
+          ],
+        })],
+        components: [
+          new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+              .setCustomId('server:menu:reward_create')
+              .setPlaceholder('Select a reward plan')
+              .addOptions(options),
+          ),
+        ],
+        flags: MessageFlags.Ephemeral,
+      });
     }
 
     if (action === 'rewards') {
@@ -783,8 +705,15 @@ export async function handleServerInteraction(interaction, parts) {
       const data = ServerProvision.ensureGuild(guildId);
       const panelSetup = data.panelSetup;
       const inviteCount = await fetchInviteCountForMember(interaction.guild, userId);
-      const requirement = Math.max(0, Number(panelSetup?.inviteRequirement ?? data.inviteRequirement ?? 0) || 0);
-      const eligible = inviteCount >= requirement;
+      const rewards = getInviteRewardPlans(data, panelSetup);
+      const preview = rewards.slice(0, 10).map((reward) => formatRewardLine(reward, inviteCount, data, panelSetup, userId)).join('\n');
+      const eligible = rewards.some((reward) => getRewardEligibility({
+        data,
+        panelSetup,
+        userId,
+        inviteCount,
+        reward,
+      }).ok);
       return interaction.followUp({
         embeds: [embed({
           title: '🎁 Invite Rewards',
@@ -794,8 +723,9 @@ export async function handleServerInteraction(interaction, parts) {
           color: Colors.info,
           fields: [
             { name: 'Your Invites', value: String(inviteCount), inline: true },
-            { name: 'Required Invites', value: String(requirement), inline: true },
+            { name: 'Total Plans', value: String(rewards.length), inline: true },
             { name: 'Eligible', value: eligible ? '✅ Yes' : '❌ No', inline: true },
+            { name: 'Plans', value: preview || 'No reward plans configured yet.', inline: false },
           ],
         })],
         flags: MessageFlags.Ephemeral,
@@ -1007,7 +937,179 @@ export async function handleServerInteraction(interaction, parts) {
   }
 
   if (interaction.isStringSelectMenu()) {
-    if (type !== 'menu' || parts[2] !== 'provider') return interaction.deferUpdate();
+    if (type !== 'menu') return interaction.deferUpdate();
+
+    if (parts[2] === 'reward_create') {
+      const selectedRewardId = interaction.values[0];
+      const lock = claimLockKey(guildId, userId);
+      if (pendingProvisionClaims.has(lock)) {
+        return interaction.reply({
+          embeds: [errorEmbed('A provisioning request for you is already in progress. Please wait.')],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      await interaction.deferUpdate();
+      pendingProvisionClaims.add(lock);
+      try {
+        const data = ServerProvision.ensureGuild(guildId);
+        const panelSetup = data.panelSetup;
+        if (!panelSetup) {
+          return interaction.followUp({
+            embeds: [errorEmbed('Panel setup is not configured yet. Ask an admin to run **Setup Panel** first.')],
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+        const rewardPlan = getInviteRewardPlans(data, panelSetup).find((reward) => reward.id === selectedRewardId);
+        if (!rewardPlan) {
+          return interaction.followUp({
+            embeds: [errorEmbed('Selected reward plan was not found. Please try again.')],
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+
+        const inviteCount = await fetchInviteCountForMember(interaction.guild, userId);
+        const eligibility = getRewardEligibility({
+          data,
+          panelSetup,
+          userId,
+          inviteCount,
+          reward: rewardPlan,
+        });
+        if (!eligibility.ok) {
+          const cooldownHint = eligibility.nextClaimAt > Date.now()
+            ? ` Try again in **${formatDuration(eligibility.nextClaimAt - Date.now())}**.`
+            : '';
+          return interaction.followUp({
+            embeds: [errorEmbed(`${eligibility.reason}${cooldownHint}`)],
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+
+        const claim = ServerProvision.ensureUserClaim(guildId, userId);
+        const rewardClaim = getRewardClaimState(claim, rewardPlan.id);
+        const servers = ServerProvision.ensureUserServers(guildId, userId);
+        const cooldowns = ServerProvision.ensureUserCooldowns(guildId, userId);
+        const history = ServerProvision.ensureClaimHistory(guildId);
+        const idempotencyKey = `${guildId}:${userId}:${rewardPlan.id}:${randomUUID()}`;
+        const endpoint = getPanelApiEndpoint(panelSetup, 'create');
+        if (!endpoint) {
+          return interaction.followUp({
+            embeds: [errorEmbed('Invalid panel API base URL in setup. Re-run setup and save again.')],
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+
+        const payload = buildProvisionPayload(panelSetup, rewardPlan, interaction.user, idempotencyKey, inviteCount);
+        const provision = await callPanelApi(panelSetup, 'POST', endpoint, payload);
+        if (!provision.ok) {
+          return interaction.followUp({
+            embeds: [errorEmbed(`Failed to create server: ${provision.error}`)],
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+
+        const createdAtIso = new Date().toISOString();
+        const panelServerId =
+          provision.data?.attributes?.id ||
+          provision.data?.id ||
+          provision.data?.server_id ||
+          idempotencyKey;
+        if (panelServerId === idempotencyKey) {
+          logger.warn('Panel API did not return a server ID; falling back to external ID key.');
+        }
+        const serverName = payload.name;
+        const record = {
+          id: idempotencyKey,
+          panelServerId: String(panelServerId),
+          name: serverName,
+          provider: panelSetup.provider,
+          rewardPlanId: rewardPlan.id,
+          rewardPlanName: rewardPlan.name,
+          status: 'active',
+          createdAt: createdAtIso,
+          inviteCountAtClaim: inviteCount,
+          createdBy: userId,
+        };
+        servers.push(record);
+        claim.claimed = true;
+        claim.claimCount = (claim.claimCount ?? 0) + 1;
+        claim.lastClaimAt = createdAtIso;
+        claim.lastInviteSnapshot = inviteCount;
+        claim.lastRewardId = rewardPlan.id;
+        if (!claim.rewardClaims || typeof claim.rewardClaims !== 'object') {
+          claim.rewardClaims = {};
+        }
+        claim.rewardClaims[rewardPlan.id] = {
+          claimCount: rewardClaim.claimCount + 1,
+          lastClaimAt: createdAtIso,
+          lastInviteSnapshot: inviteCount,
+        };
+        if (rewardPlan.cooldownHours > 0) {
+          setRewardCooldown(cooldowns, rewardPlan.id, Date.now() + hoursToMs(rewardPlan.cooldownHours));
+        } else {
+          setRewardCooldown(cooldowns, rewardPlan.id, 0);
+        }
+        history.push({
+          id: randomUUID(),
+          userId,
+          rewardPlanId: rewardPlan.id,
+          rewardPlanName: rewardPlan.name,
+          invitesAtClaim: inviteCount,
+          panelServerId: record.panelServerId,
+          createdAt: createdAtIso,
+          claimCountForReward: claim.rewardClaims[rewardPlan.id].claimCount,
+        });
+        ServerProvision.updateGuild(guildId, {
+          userClaims: data.userClaims,
+          createdServerRecords: data.createdServerRecords,
+          cooldowns: data.cooldowns,
+          claimHistory: data.claimHistory,
+        });
+
+        const detailEmbed = embed({
+          title: '✅ Server Created',
+          color: Colors.success,
+          description: 'Your invite reward server has been provisioned successfully.',
+          fields: [
+            { name: 'Reward Plan', value: `\`${rewardPlan.name}\``, inline: true },
+            { name: 'Server Name', value: `\`${serverName}\``, inline: true },
+            { name: 'Server ID', value: `\`${record.panelServerId}\``, inline: true },
+            { name: 'Provider', value: `\`${panelSetup.providerLabel ?? panelSetup.provider}\``, inline: true },
+            { name: 'Plan Claim Count', value: String(claim.rewardClaims[rewardPlan.id].claimCount), inline: true },
+            { name: 'Invites Used', value: String(inviteCount), inline: true },
+          ],
+        });
+
+        try {
+          await interaction.user.send({ embeds: [detailEmbed] });
+        } catch (err) {
+          logger.warn(`Could not DM server details to ${interaction.user.tag}: ${err?.message ?? 'unknown error'}`);
+        }
+        await interaction.followUp({ embeds: [detailEmbed], flags: MessageFlags.Ephemeral });
+
+        await sendAdminLog(interaction.guild, {
+          embeds: [embed({
+            title: '🆕 Reward Server Provisioned',
+            color: Colors.info,
+            fields: [
+              { name: 'User', value: `<@${userId}> (\`${userId}\`)`, inline: false },
+              { name: 'Reward Plan', value: `\`${rewardPlan.name}\` (\`${rewardPlan.id}\`)`, inline: false },
+              { name: 'Server ID', value: `\`${record.panelServerId}\``, inline: true },
+              { name: 'Server Name', value: `\`${record.name}\``, inline: true },
+              { name: 'Provider', value: `\`${record.provider}\``, inline: true },
+              { name: 'Invites', value: String(inviteCount), inline: true },
+              { name: 'Total Claims', value: String(claim.claimCount), inline: true },
+            ],
+          })],
+        });
+        return;
+      } finally {
+        pendingProvisionClaims.delete(lock);
+      }
+    }
+
+    if (parts[2] !== 'provider') return interaction.deferUpdate();
     if (!admin) {
       return interaction.reply({ embeds: [errorEmbed('Only administrators can modify setup.')], flags: MessageFlags.Ephemeral });
     }
@@ -1043,9 +1145,14 @@ export async function handleServerInteraction(interaction, parts) {
           claimCount: 0,
           lastClaimAt: null,
           lastInviteSnapshot: null,
+          rewardClaims: {},
         };
         if (cooldowns[targetUserId]) {
-          delete cooldowns[targetUserId].nextClaimAt;
+          for (const key of Object.keys(cooldowns[targetUserId])) {
+            if (key.startsWith('reward:') || key === 'nextClaimAt') {
+              delete cooldowns[targetUserId][key];
+            }
+          }
         }
         ServerProvision.updateGuild(guildId, { userClaims: claims, cooldowns });
         await sendAdminLog(interaction.guild, {

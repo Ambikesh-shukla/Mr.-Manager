@@ -56,6 +56,7 @@ export default {
             value: [
               '`/review submit` — Submit a review/vouch',
               '`/afk set/remove/status` — AFK status with auto-reply on mention',
+              '`/invite status` — View your invite rewards, claims, and eligibility',
               '`/serverinfo` — Server statistics',
               '`/ping` — Bot latency check',
               '`/help` — This menu',

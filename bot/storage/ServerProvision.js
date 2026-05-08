@@ -8,7 +8,9 @@ function defaults(guildId) {
     panelConfigRef: null,
     panelSetup: null,
     inviteRequirement: 0,
+    inviteRewards: [],
     userClaims: {},
+    claimHistory: [],
     createdServerRecords: {},
     cooldowns: {},
   };
@@ -20,7 +22,9 @@ function normalizeGuildData(guildId, data = {}) {
     ...base,
     guildId,
     panelSetup: base.panelSetup && typeof base.panelSetup === 'object' ? base.panelSetup : null,
+    inviteRewards: Array.isArray(base.inviteRewards) ? base.inviteRewards : [],
     userClaims: typeof base.userClaims === 'object' && base.userClaims ? base.userClaims : {},
+    claimHistory: Array.isArray(base.claimHistory) ? base.claimHistory : [],
     createdServerRecords: typeof base.createdServerRecords === 'object' && base.createdServerRecords ? base.createdServerRecords : {},
     cooldowns: typeof base.cooldowns === 'object' && base.cooldowns ? base.cooldowns : {},
   };
@@ -48,7 +52,10 @@ export const ServerProvision = {
   ensureUserClaim(guildId, userId) {
     const data = ServerProvision.ensureGuild(guildId);
     if (!data.userClaims[userId]) {
-      data.userClaims[userId] = { claimed: false, claimCount: 0, lastClaimAt: null };
+      data.userClaims[userId] = { claimed: false, claimCount: 0, lastClaimAt: null, rewardClaims: {} };
+      ServerProvision.setGuild(guildId, data);
+    } else if (!data.userClaims[userId].rewardClaims || typeof data.userClaims[userId].rewardClaims !== 'object') {
+      data.userClaims[userId].rewardClaims = {};
       ServerProvision.setGuild(guildId, data);
     }
     return data.userClaims[userId];
@@ -70,5 +77,14 @@ export const ServerProvision = {
       ServerProvision.setGuild(guildId, data);
     }
     return data.cooldowns[userId];
+  },
+
+  ensureClaimHistory(guildId) {
+    const data = ServerProvision.ensureGuild(guildId);
+    if (!Array.isArray(data.claimHistory)) {
+      data.claimHistory = [];
+      ServerProvision.setGuild(guildId, data);
+    }
+    return data.claimHistory;
   },
 };
