@@ -2,8 +2,10 @@ import { PermissionFlagsBits } from 'discord.js';
 import { GuildConfig } from '../storage/GuildConfig.js';
 import { Afk } from '../storage/Afk.js';
 import { SetupSession } from '../storage/SetupSession.js';
+import { PostEmbedSession } from '../storage/PostEmbedSession.js';
 import { LinkConfig } from '../storage/LinkConfig.js';
 import { handleWizardMessage } from '../handlers/setupHandler.js';
+import { handlePostEmbedWizardMessage } from '../handlers/postHandler.js';
 import { logger } from '../utils/logger.js';
 
 const afkMentionCooldown = new Map();
@@ -34,6 +36,13 @@ export default {
     const wizardSession = SetupSession.getWaitingInChannel(message.guild.id, message.channelId);
     if (wizardSession && message.author.id === wizardSession.userId) {
       await handleWizardMessage(message, wizardSession);
+      return;
+    }
+
+    // ── /post embed wizard message collector ──────────────────────────────────
+    const postEmbedSession = PostEmbedSession.getWaitingInChannel(message.guild.id, message.channelId, message.author.id);
+    if (postEmbedSession && message.author.id === postEmbedSession.userId) {
+      await handlePostEmbedWizardMessage(message, postEmbedSession);
       return;
     }
 

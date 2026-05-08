@@ -27,6 +27,7 @@ import { embed, Colors, successEmbed } from '../utils/embeds.js';
 import { handleWelcomeInteraction } from '../handlers/welcomeHandler.js';
 import { handleLinkInteraction } from '../handlers/linkHandler.js';
 import { handleServerInteraction } from '../handlers/serverHandler.js';
+import { handlePostEmbedButton } from '../handlers/postHandler.js';
 
 export default {
   name: 'interactionCreate',
@@ -106,6 +107,7 @@ export default {
         if (ns === 'welcome') return handleWelcomeInteraction(interaction, parts);
 
         if (ns === 'link') return handleLinkInteraction(interaction, parts);
+        if (ns === 'post') return handlePostEmbedButton(interaction, parts);
         if (ns === 'server') return handleServerInteraction(interaction, parts);
         if (ns === 'panel') return handlePanelButton(interaction, id, extra ?? null);
         if (ns === 'ticketopentype') return openTicket(interaction, action, id);
