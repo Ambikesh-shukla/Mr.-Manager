@@ -6,6 +6,7 @@ function defaults(guildId) {
   return {
     guildId,
     panelConfigRef: null,
+    provisioningMode: 'invite_reward',
     panelSetup: null,
     inviteRequirement: 0,
     inviteRewards: [],
@@ -21,6 +22,7 @@ function normalizeGuildData(guildId, data = {}) {
   return {
     ...base,
     guildId,
+    provisioningMode: base.provisioningMode === 'manual_admin' ? 'manual_admin' : 'invite_reward',
     panelSetup: base.panelSetup && typeof base.panelSetup === 'object' ? base.panelSetup : null,
     inviteRewards: Array.isArray(base.inviteRewards) ? base.inviteRewards : [],
     userClaims: typeof base.userClaims === 'object' && base.userClaims ? base.userClaims : {},
