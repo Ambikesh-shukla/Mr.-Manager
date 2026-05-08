@@ -3,10 +3,10 @@ import { randomUUID } from 'crypto';
 import { ServerProvision } from '../../storage/ServerProvision.js';
 import { embed, Colors, successEmbed, errorEmbed } from '../../utils/embeds.js';
 import {
-  fetchInviteCountForMember,
   getInviteRewardPlans,
   getRewardEligibility,
   getRewardClaimState,
+  getInviteStatsForMember,
 } from '../../utils/inviteRewards.js';
 
 function formatRewardStatusLine({ reward, eligibility, inviteCount }) {
@@ -42,10 +42,7 @@ function rewardFromOptions(interaction) {
 export default {
   data: new SlashCommandBuilder()
     .setName('invite')
-    .setDescription('View invite reward status and manage invite reward plans')
-    .addSubcommand((sub) => sub
-      .setName('status')
-      .setDescription('Show your invite rewards status'))
+    .setDescription('View your invite stats and manage invite reward plans')
     .addSubcommand((sub) => sub
       .setName('list')
       .setDescription('List configured invite reward plans'))
@@ -67,14 +64,15 @@ export default {
       .setDescription('Delete an invite reward plan')
       .addStringOption((opt) => opt.setName('reward_id').setDescription('Reward plan ID').setRequired(true))),
 
-  defaultLevel: 'admin',
+  defaultLevel: 'public',
   subcommandDefaults: {
-    status: 'public',
-    list: 'public',
+    list: 'admin',
+    add: 'admin',
+    delete: 'admin',
   },
 
   async execute(interaction) {
-    const sub = interaction.options.getSubcommand();
+    const sub = interaction.options.getSubcommand(false);
     const guildId = interaction.guild.id;
     const data = ServerProvision.ensureGuild(guildId);
     const panelSetup = data.panelSetup;
@@ -112,7 +110,8 @@ export default {
       });
     }
 
-    const inviteCount = await fetchInviteCountForMember(interaction.guild, interaction.user.id);
+    const inviteStats = getInviteStatsForMember(data, interaction.user.id);
+    const inviteCount = inviteStats.real;
     const rewards = getInviteRewardPlans(data, panelSetup);
     const lines = rewards.slice(0, 10).map((reward) => {
       const eligibility = getRewardEligibility({
@@ -155,10 +154,13 @@ export default {
 
     return interaction.reply({
       embeds: [embed({
-        title: '🎁 Invite Rewards Status',
+        title: '📨 Invite Stats & Rewards',
         color: Colors.primary,
         fields: [
-          { name: 'Current Invites', value: String(inviteCount), inline: true },
+          { name: 'Total Invites', value: String(inviteStats.total), inline: true },
+          { name: 'Real Invites', value: String(inviteStats.real), inline: true },
+          { name: 'Fake Invites', value: String(inviteStats.fake), inline: true },
+          { name: 'Rejoin Invites', value: String(inviteStats.rejoin), inline: true },
           { name: 'Remaining Invites Needed', value: String(minRemaining), inline: true },
           { name: 'Claimed Rewards', value: claimedRewards, inline: false },
           { name: 'Available Server Rewards', value: lines.join('\n') || 'No reward plans configured yet.', inline: false },

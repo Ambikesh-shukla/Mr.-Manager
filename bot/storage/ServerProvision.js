@@ -12,6 +12,7 @@ function defaults(guildId) {
     inviteRewards: [],
     userClaims: {},
     claimHistory: [],
+    inviteJoins: [],
     createdServerRecords: {},
     cooldowns: {},
   };
@@ -27,6 +28,7 @@ function normalizeGuildData(guildId, data = {}) {
     inviteRewards: Array.isArray(base.inviteRewards) ? base.inviteRewards : [],
     userClaims: typeof base.userClaims === 'object' && base.userClaims ? base.userClaims : {},
     claimHistory: Array.isArray(base.claimHistory) ? base.claimHistory : [],
+    inviteJoins: Array.isArray(base.inviteJoins) ? base.inviteJoins : [],
     createdServerRecords: typeof base.createdServerRecords === 'object' && base.createdServerRecords ? base.createdServerRecords : {},
     cooldowns: typeof base.cooldowns === 'object' && base.cooldowns ? base.cooldowns : {},
   };
@@ -88,5 +90,14 @@ export const ServerProvision = {
       ServerProvision.setGuild(guildId, data);
     }
     return data.claimHistory;
+  },
+
+  ensureInviteJoins(guildId) {
+    const data = ServerProvision.ensureGuild(guildId);
+    if (!Array.isArray(data.inviteJoins)) {
+      data.inviteJoins = [];
+      ServerProvision.setGuild(guildId, data);
+    }
+    return data.inviteJoins;
   },
 };
