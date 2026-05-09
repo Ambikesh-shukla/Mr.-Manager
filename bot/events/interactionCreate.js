@@ -32,7 +32,7 @@ import { handleLinkInteraction } from '../handlers/linkHandler.js';
 import { handleServerInteraction } from '../handlers/serverHandler.js';
 import { handlePostEmbedButton } from '../handlers/postHandler.js';
 
-const NO_CREDITS_MSG = '❌ This server does not have enough credits. Use `/credits` or `/redeem`.';
+const INSUFFICIENT_CREDITS_MSG = '❌ This server does not have enough credits. Use `/credits` or `/redeem`.';
 
 /**
  * Billing middleware: checks credits, deducts before executing the action,
@@ -53,8 +53,8 @@ async function withBilling(interaction, fn) {
   const result = await deductCredit(guildId, actionKey, cost);
 
   if (!result.ok) {
-    return safeReply(interaction, {
-      embeds: [errorEmbed(NO_CREDITS_MSG)],
+      return safeReply(interaction, {
+      embeds: [errorEmbed(INSUFFICIENT_CREDITS_MSG)],
       flags: 64,
     });
   }

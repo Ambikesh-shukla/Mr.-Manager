@@ -53,7 +53,7 @@ export default {
           title: '💳 Server Credits',
           color: isPro ? Colors.gold : Colors.primary,
           fields: [
-            { name: '📦 Plan', value: plan === 'none' ? 'None' : String(plan).toUpperCase(), inline: true },
+            { name: '📦 Plan', value: plan === 'none' ? 'None' : plan.toUpperCase(), inline: true },
             { name: '💳 Remaining Credits', value: creditsDisplay, inline: true },
             { name: '📊 Total Used', value: String(totalUsed), inline: true },
             { name: '📅 Plan Expiry', value: expiryDisplay, inline: false },

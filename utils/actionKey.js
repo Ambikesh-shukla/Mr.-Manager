@@ -39,7 +39,8 @@ function parseKnownCustomId(customId) {
 }
 
 function parseComponentActionKey(interaction) {
-  return parseBillCustomId(interaction?.customId) ?? parseKnownCustomId(interaction?.customId);
+  const customId = interaction?.customId;
+  return parseBillCustomId(customId) ?? parseKnownCustomId(customId);
 }
 
 export function detectActionKey(interaction) {
