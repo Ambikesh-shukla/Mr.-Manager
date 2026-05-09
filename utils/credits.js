@@ -1,8 +1,47 @@
-import { getDb } from '../database/mongo.js';
+import { connectMongo, getDb } from '../database/mongo.js';
 import { logger } from '../bot/utils/logger.js';
 
 const GUILDS = 'guilds';
 const TRANSACTIONS = 'credit_transactions';
+const DEFAULT_PLAN = 'free';
+const DEFAULT_CREDITS = 50;
+
+async function getDbWithReconnect() {
+  try {
+    return getDb();
+  } catch {
+    try {
+      await connectMongo();
+      return getDb();
+    } catch {
+      return null;
+    }
+  }
+}
+
+export async function ensureGuildCredits(guildId) {
+  if (!guildId) return null;
+
+  const db = await getDbWithReconnect();
+  if (!db) return null;
+
+  const now = new Date();
+  return db.collection(GUILDS).findOneAndUpdate(
+    { guildId },
+    {
+      $setOnInsert: {
+        guildId,
+        plan: DEFAULT_PLAN,
+        credits: DEFAULT_CREDITS,
+        totalUsed: 0,
+        planExpiresAt: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    },
+    { upsert: true, returnDocument: 'after' },
+  );
+}
 
 /**
  * Fetch the billing-relevant guild document from MongoDB.
@@ -11,12 +50,7 @@ const TRANSACTIONS = 'credit_transactions';
  * @param {string} guildId
  */
 export async function getGuildInfo(guildId) {
-  try {
-    const db = getDb();
-    return (await db.collection(GUILDS).findOne({ guildId })) ?? null;
-  } catch {
-    return null;
-  }
+  return ensureGuildCredits(guildId);
 }
 
 /**
@@ -31,8 +65,10 @@ export async function getGuildInfo(guildId) {
  */
 export async function deductCredit(guildId, actionKey, cost = 1) {
   try {
-    const db = getDb();
-    const guild = await db.collection(GUILDS).findOne({ guildId });
+    const db = await getDbWithReconnect();
+    if (!db) return { ok: false, reason: 'error' };
+
+    const guild = await ensureGuildCredits(guildId);
 
     if (!guild) {
       return { ok: false, reason: 'no_plan' };
@@ -40,6 +76,10 @@ export async function deductCredit(guildId, actionKey, cost = 1) {
 
     // Pro plan — unlimited credits; only track usage.
     if (guild.credits === -1) {
+      await db.collection(GUILDS).updateOne(
+        { guildId },
+        { $inc: { totalUsed: cost }, $set: { updatedAt: new Date() } },
+      );
       await _logTransaction(guildId, 'deduct', actionKey, cost);
       return { ok: true, unlimited: true };
     }
@@ -47,7 +87,7 @@ export async function deductCredit(guildId, actionKey, cost = 1) {
     // Atomic decrement guarded by credit balance.
     const updatedDoc = await db.collection(GUILDS).findOneAndUpdate(
       { guildId, credits: { $gte: cost } },
-      { $inc: { credits: -cost }, $set: { updatedAt: new Date() } },
+      { $inc: { credits: -cost, totalUsed: cost }, $set: { updatedAt: new Date() } },
       { returnDocument: 'after' },
     );
 
@@ -74,8 +114,10 @@ export async function deductCredit(guildId, actionKey, cost = 1) {
  */
 export async function refundCredit(guildId, actionKey, cost = 1) {
   try {
-    const db = getDb();
-    const guild = await db.collection(GUILDS).findOne({ guildId });
+    const db = await getDbWithReconnect();
+    if (!db) return;
+
+    const guild = await ensureGuildCredits(guildId);
     if (!guild) return;
 
     if (guild.credits !== -1) {

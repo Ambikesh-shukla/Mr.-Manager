@@ -2,6 +2,7 @@ import { ActivityType } from 'discord.js';
 import { logger } from '../utils/logger.js';
 import { registerCommands } from '../handlers/registerCommands.js';
 import { primeInviteSnapshotsForClient } from '../utils/inviteTracker.js';
+import { ensureGuildCredits } from '../../utils/credits.js';
 
 export default {
   name: 'clientReady',
@@ -17,6 +18,15 @@ export default {
     } catch (err) {
       logger.error('Failed to register slash commands on startup', err);
     }
+
+    const guildIds = [...client.guilds.cache.keys()];
+    await Promise.all(guildIds.map(async (guildId) => {
+      try {
+        await ensureGuildCredits(guildId);
+      } catch (err) {
+        logger.warn(`[BILLING] Failed to initialize default credits for guild ${guildId}`, err);
+      }
+    }));
 
     await primeInviteSnapshotsForClient(client);
   },

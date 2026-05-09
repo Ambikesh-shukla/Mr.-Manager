@@ -1,7 +1,7 @@
 import { readFile } from 'fs/promises';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { getDb } from '../database/mongo.js';
+import { connectMongo, getDb } from '../database/mongo.js';
 import { logger } from '../bot/utils/logger.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -13,6 +13,19 @@ const PLAN_REWARDS = Object.freeze({
   pro: -1,
 });
 const PLAN_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
+
+async function getDbWithReconnect() {
+  try {
+    return getDb();
+  } catch {
+    try {
+      await connectMongo();
+      return getDb();
+    } catch {
+      return null;
+    }
+  }
+}
 
 function normalizeCode(code) {
   return String(code ?? '').trim().toLowerCase();
@@ -42,10 +55,8 @@ export async function loadRedeemCodesFromConfig() {
 }
 
 export async function syncRedeemCodesFromSeed() {
-  let db;
-  try {
-    db = getDb();
-  } catch {
+  const db = await getDbWithReconnect();
+  if (!db) {
     logger.warn('Skipping redeem code seed sync because MongoDB is not connected.');
     return { synced: 0, inserted: 0 };
   }
@@ -80,17 +91,23 @@ export async function redeemCodeForGuild({ code, guildId, userId }) {
   const normalizedCode = normalizeCode(code);
   if (!normalizedCode) return { ok: false, reason: 'invalid_code' };
 
-  let db;
-  try {
-    db = getDb();
-  } catch {
+  const db = await getDbWithReconnect();
+  if (!db) {
     return { ok: false, reason: 'storage_unavailable' };
   }
 
   const now = new Date();
   const codesCollection = db.collection(REDEEM_CODES_COLLECTION);
 
-  const existing = await codesCollection.findOne({ code: normalizedCode });
+  let existing = await codesCollection.findOne({ code: normalizedCode });
+  if (!existing) {
+    try {
+      await syncRedeemCodesFromSeed();
+      existing = await codesCollection.findOne({ code: normalizedCode });
+    } catch (err) {
+      logger.warn('[REDEEM] Failed to sync/reload redeem codes before validation', err);
+    }
+  }
   if (!existing) return { ok: false, reason: 'not_found' };
   if (!existing.active) return { ok: false, reason: 'inactive' };
 
@@ -164,7 +181,10 @@ export async function redeemCodeForGuild({ code, guildId, userId }) {
         planExpiresAt,
         updatedAt: now,
       },
-      $setOnInsert: { createdAt: now },
+      $setOnInsert: {
+        createdAt: now,
+        totalUsed: 0,
+      },
     },
     { upsert: true },
   );
