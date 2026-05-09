@@ -12,6 +12,15 @@ const STEPS = [
   { key: 'targetChannelId', label: 'Target channel', max: 30 },
 ];
 
+const SKIP_DEFAULTS = {
+  title: null,
+  description: null,
+  color: '#5865F2',
+  image: null,
+  thumbnail: null,
+  footer: null,
+};
+
 function dashboardComponents() {
   return [
     new ActionRowBuilder().addComponents(
@@ -138,6 +147,11 @@ function buildStepEmbed(stepKey) {
 function buildFinalEmbed(session) {
   const colorInt = parseInt((session.color ?? '#5865F2').replace('#', ''), 16) || Colors.primary;
   const out = new EmbedBuilder().setColor(colorInt);
+  const hasNoContent = !session.title && !session.description && !session.image && !session.thumbnail && !session.footer;
+  if (hasNoContent) {
+    out.setDescription('\u200B');
+    return out;
+  }
 
   if (session.title) out.setTitle(session.title);
   if (session.description) out.setDescription(session.description);
@@ -145,10 +159,6 @@ function buildFinalEmbed(session) {
   if (session.image) out.setImage(session.image);
   if (session.thumbnail) out.setThumbnail(session.thumbnail);
   if (session.footer) out.setFooter({ text: session.footer });
-  const hasNoContent = !session.title && !session.description && !session.image && !session.thumbnail && !session.footer;
-  if (hasNoContent) {
-    out.setDescription('\u200B');
-  }
   return out;
 }
 
@@ -251,18 +261,11 @@ export async function handlePostEmbedButton(interaction, parts) {
     }
 
     const patch = { step: nextStep(step) };
-    const skipDefaults = {
-      title: null,
-      description: null,
-      color: '#5865F2',
-      image: null,
-      thumbnail: null,
-      footer: null,
-    };
-    if (step in skipDefaults) {
-      patch[step] = skipDefaults[step];
+    if (step in SKIP_DEFAULTS) {
+      patch[step] = SKIP_DEFAULTS[step];
     } else if (step === 'targetChannelId') {
-      patch.targetChannelId = session.inputChannelId ?? interaction.channelId;
+      const originalChannelId = session.inputChannelId ?? interaction.channelId;
+      patch.targetChannelId = originalChannelId;
       patch.step = null;
       patch.inputChannelId = null;
     }
