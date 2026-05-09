@@ -1,4 +1,4 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import { Colors, errorEmbed, successEmbed } from '../utils/embeds.js';
 import { PostEmbedSession } from '../storage/PostEmbedSession.js';
 
@@ -154,6 +154,28 @@ async function updateOriginalWizardMessage(session, payload) {
   } catch {}
 }
 
+function canDeleteUserMessage(message) {
+  const me = message.guild?.members?.me;
+  if (!me) return false;
+  return me.permissionsIn(message.channel).has(PermissionFlagsBits.ManageMessages);
+}
+
+async function tryDeleteUserMessage(message) {
+  if (!canDeleteUserMessage(message)) return;
+  try {
+    await message.delete();
+  } catch {}
+}
+
+async function replyWithAutoDelete(message, payload, delayMs = 5000) {
+  const botReply = await message.reply(payload).catch(() => null);
+  if (!botReply) return null;
+  setTimeout(() => {
+    botReply.delete().catch(() => {});
+  }, delayMs);
+  return botReply;
+}
+
 async function respondWithDashboard(interaction, session) {
   const payload = { embeds: [buildWizardDashboardEmbed(session)], components: dashboardComponents(), flags: 64 };
   if (interaction.replied || interaction.deferred) return interaction.editReply(payload);
@@ -223,7 +245,16 @@ export async function handlePostEmbedButton(interaction, parts) {
     }
     try {
       await target.send({ embeds: [buildFinalEmbed(session)] });
-      return interaction.reply({ embeds: [successEmbed('Published', `Embed sent to <#${target.id}>.`)], flags: 64 });
+      await updateOriginalWizardMessage(session, {
+        embeds: [successEmbed('Published', `Embed sent to <#${target.id}>.`)],
+        components: [],
+      });
+      PostEmbedSession.delete(guildId, userId);
+      await interaction.reply({ content: `✅ Published to <#${target.id}>.`, flags: 64 });
+      setTimeout(() => {
+        interaction.deleteReply().catch(() => {});
+      }, 5000);
+      return;
     } catch {
       return interaction.reply({ embeds: [errorEmbed('Failed to publish embed. Check bot send/embed permissions in that channel.')], flags: 64 });
     }
@@ -241,20 +272,29 @@ export async function handlePostEmbedWizardMessage(message, session) {
   const max = currentStepMeta(step)?.max ?? 2000;
 
   if (step === 'title') {
-    if (!rawTrim) return message.reply({ embeds: [errorEmbed('Title cannot be empty. Please send the title again.')] });
+    if (!rawTrim) {
+      await tryDeleteUserMessage(message);
+      return replyWithAutoDelete(message, { embeds: [errorEmbed('Title cannot be empty. Please send the title again.')] });
+    }
     PostEmbedSession.update(session.guildId, session.userId, {
       title: raw.slice(0, max),
       step: nextStep(step),
     });
   } else if (step === 'description') {
-    if (!rawTrim) return message.reply({ embeds: [errorEmbed('Description cannot be empty. Please send the description again.')] });
+    if (!rawTrim) {
+      await tryDeleteUserMessage(message);
+      return replyWithAutoDelete(message, { embeds: [errorEmbed('Description cannot be empty. Please send the description again.')] });
+    }
     PostEmbedSession.update(session.guildId, session.userId, {
       description: raw.slice(0, max),
       step: nextStep(step),
     });
   } else if (step === 'color') {
     const normalized = normalizeHexColor(rawTrim);
-    if (!normalized) return message.reply({ embeds: [errorEmbed('Invalid color. Use a 6-digit hex code like `#5865F2`.')] });
+    if (!normalized) {
+      await tryDeleteUserMessage(message);
+      return replyWithAutoDelete(message, { embeds: [errorEmbed('Invalid color. Use a 6-digit hex code like `#5865F2`.')] });
+    }
     PostEmbedSession.update(session.guildId, session.userId, {
       color: normalized,
       step: nextStep(step),
@@ -262,7 +302,8 @@ export async function handlePostEmbedWizardMessage(message, session) {
   } else if (step === 'image' || step === 'thumbnail') {
     const value = getImageUrlFromMessage(message);
     if (value === null) {
-      return message.reply({
+      await tryDeleteUserMessage(message);
+      return replyWithAutoDelete(message, {
         embeds: [errorEmbed(`Invalid ${step} input. Send a valid image URL or image attachment, or type \`skip\`.`)],
       });
     }
@@ -279,7 +320,8 @@ export async function handlePostEmbedWizardMessage(message, session) {
   } else if (step === 'targetChannelId') {
     const channelId = await resolveTargetChannelId(message);
     if (!channelId) {
-      return message.reply({ embeds: [errorEmbed('Invalid channel. Mention a text channel like `#general` or provide a channel ID.')] });
+      await tryDeleteUserMessage(message);
+      return replyWithAutoDelete(message, { embeds: [errorEmbed('Invalid channel. Mention a text channel like `#general` or provide a channel ID.')] });
     }
     PostEmbedSession.update(session.guildId, session.userId, {
       targetChannelId: channelId,
@@ -287,6 +329,8 @@ export async function handlePostEmbedWizardMessage(message, session) {
       inputChannelId: null,
     });
   }
+
+  await tryDeleteUserMessage(message);
 
   const updated = PostEmbedSession.get(session.guildId, session.userId);
   if (!updated) return;
@@ -304,4 +348,3 @@ export async function handlePostEmbedWizardMessage(message, session) {
     components: waitingComponents(),
   });
 }
-
