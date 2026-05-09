@@ -268,6 +268,7 @@ export default {
           }
         }
 
+        return undefined;
         });
       }
 
@@ -288,6 +289,7 @@ export default {
         if (ns === 'panelselect') return handlePanelSelect(interaction, action);
         if (ns === 'ticketpriority_set') return handlePrioritySet(interaction, action);
         if (ns === 'noop') return interaction.deferUpdate();
+        return undefined;
         });
       }
 
@@ -386,6 +388,7 @@ export default {
           }
           return interaction.reply({ embeds: [successEmbed('Review Submitted', 'Your review has been posted. Thank you! 🙏')], flags: 64 });
         }
+        return undefined;
         });
       }
 

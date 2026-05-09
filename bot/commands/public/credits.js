@@ -30,7 +30,7 @@ export default {
     const credits = guildInfo?.credits ?? 0;
     const planExpiresAt = guildInfo?.planExpiresAt;
 
-    const isPro = plan === 'pro' && credits === -1;
+    const isPro = credits === -1;
     const creditsDisplay = credits === -1 ? '∞ Unlimited' : String(credits);
 
     const expiryDisplay = planExpiresAt
