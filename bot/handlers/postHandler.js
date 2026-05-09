@@ -145,7 +145,8 @@ function buildFinalEmbed(session) {
   if (session.image) out.setImage(session.image);
   if (session.thumbnail) out.setThumbnail(session.thumbnail);
   if (session.footer) out.setFooter({ text: session.footer });
-  if (!session.title && !session.description && !session.image && !session.thumbnail && !session.footer) {
+  const hasNoContent = !session.title && !session.description && !session.image && !session.thumbnail && !session.footer;
+  if (hasNoContent) {
     out.setDescription('\u200B');
   }
   return out;
@@ -155,14 +156,18 @@ async function updateOriginalWizardMessage(session, payload) {
   if (!session?.webhook) return;
   try {
     await session.webhook.editMessage('@original', payload);
-  } catch {}
+  } catch {
+    // Best-effort update: message may be deleted or interaction token expired.
+  }
 }
 
 async function clearOriginalWizardMessage(session) {
   if (!session?.webhook) return;
   try {
     await session.webhook.deleteMessage('@original');
-  } catch {}
+  } catch {
+    // Best-effort cleanup: message may already be deleted or not accessible.
+  }
 }
 
 function canDeleteUserMessage(message) {
@@ -246,13 +251,17 @@ export async function handlePostEmbedButton(interaction, parts) {
     }
 
     const patch = { step: nextStep(step) };
-    if (step === 'title') patch.title = null;
-    else if (step === 'description') patch.description = null;
-    else if (step === 'color') patch.color = '#5865F2';
-    else if (step === 'image') patch.image = null;
-    else if (step === 'thumbnail') patch.thumbnail = null;
-    else if (step === 'footer') patch.footer = null;
-    else if (step === 'targetChannelId') {
+    const skipDefaults = {
+      title: null,
+      description: null,
+      color: '#5865F2',
+      image: null,
+      thumbnail: null,
+      footer: null,
+    };
+    if (step in skipDefaults) {
+      patch[step] = skipDefaults[step];
+    } else if (step === 'targetChannelId') {
       patch.targetChannelId = session.inputChannelId ?? interaction.channelId;
       patch.step = null;
       patch.inputChannelId = null;
