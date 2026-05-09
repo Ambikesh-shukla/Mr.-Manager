@@ -12,6 +12,15 @@ const STEPS = [
   { key: 'targetChannelId', label: 'Target channel', max: 30 },
 ];
 
+const SKIP_DEFAULTS = {
+  title: null,
+  description: null,
+  color: '#5865F2',
+  image: null,
+  thumbnail: null,
+  footer: null,
+};
+
 function dashboardComponents() {
   return [
     new ActionRowBuilder().addComponents(
@@ -26,6 +35,7 @@ function dashboardComponents() {
 function waitingComponents() {
   return [
     new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('post:embed:skip').setLabel('Skip').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('post:embed:cancel').setLabel('Cancel').setStyle(ButtonStyle.Danger),
     ),
   ];
@@ -129,17 +139,22 @@ function buildStepEmbed(stepKey) {
   return new EmbedBuilder()
     .setTitle(`🧩 Step ${meta.index + 1}/${STEPS.length} — ${meta.label}`)
     .setColor(Colors.primary)
-    .setDescription(`${prompts[stepKey]}\n\n⏳ Waiting for your next message...`)
+    .setDescription(`${prompts[stepKey]}\n\n➡️ Continue by sending your input as your next message.\n⏭️ Or use **Skip** to keep defaults.\n\n⏳ Waiting for your next message...`)
     .setFooter({ text: 'Only your next message will be used for this step' })
     .setTimestamp();
 }
 
 function buildFinalEmbed(session) {
   const colorInt = parseInt((session.color ?? '#5865F2').replace('#', ''), 16) || Colors.primary;
-  const out = new EmbedBuilder()
-    .setColor(colorInt)
-    .setTitle(session.title ?? 'Untitled Embed')
-    .setDescription(session.description ?? 'No description provided');
+  const out = new EmbedBuilder().setColor(colorInt);
+  const hasNoContent = !session.title && !session.description && !session.image && !session.thumbnail && !session.footer;
+  if (hasNoContent) {
+    out.setDescription('\u200B');
+    return out;
+  }
+
+  if (session.title) out.setTitle(session.title);
+  if (session.description) out.setDescription(session.description);
 
   if (session.image) out.setImage(session.image);
   if (session.thumbnail) out.setThumbnail(session.thumbnail);
@@ -151,7 +166,18 @@ async function updateOriginalWizardMessage(session, payload) {
   if (!session?.webhook) return;
   try {
     await session.webhook.editMessage('@original', payload);
-  } catch {}
+  } catch {
+    // Best-effort update: message may be deleted or interaction token expired.
+  }
+}
+
+async function clearOriginalWizardMessage(session) {
+  if (!session?.webhook) return;
+  try {
+    await session.webhook.deleteMessage('@original');
+  } catch {
+    // Best-effort cleanup: message may already be deleted or not accessible.
+  }
 }
 
 function canDeleteUserMessage(message) {
@@ -228,6 +254,41 @@ export async function handlePostEmbedButton(interaction, parts) {
     });
   }
 
+  if (action === 'skip') {
+    const step = session.step;
+    if (!step) {
+      return interaction.reply({ embeds: [errorEmbed('No active setup step to skip. Click **Start** first.')], flags: 64 });
+    }
+
+    const patch = { step: nextStep(step) };
+    if (step in SKIP_DEFAULTS) {
+      patch[step] = SKIP_DEFAULTS[step];
+    } else if (step === 'targetChannelId') {
+      const originalChannelId = session.inputChannelId ?? interaction.channelId;
+      patch.targetChannelId = originalChannelId;
+      patch.step = null;
+      patch.inputChannelId = null;
+    }
+
+    PostEmbedSession.update(guildId, userId, patch);
+    const updated = PostEmbedSession.get(guildId, userId);
+    if (!updated) {
+      return interaction.reply({ embeds: [errorEmbed('Post embed session expired. Run `/post embed` again.')], flags: 64 });
+    }
+
+    if (!updated.step) {
+      return interaction.update({
+        embeds: [buildWizardDashboardEmbed(updated)],
+        components: dashboardComponents(),
+      });
+    }
+
+    return interaction.update({
+      embeds: [buildStepEmbed(updated.step)],
+      components: waitingComponents(),
+    });
+  }
+
   if (action === 'preview') {
     return interaction.reply({
       embeds: [buildFinalEmbed(session)],
@@ -245,10 +306,7 @@ export async function handlePostEmbedButton(interaction, parts) {
     }
     try {
       await target.send({ embeds: [buildFinalEmbed(session)] });
-      await updateOriginalWizardMessage(session, {
-        embeds: [successEmbed('Published', `Embed sent to <#${target.id}>.`)],
-        components: [],
-      });
+      await clearOriginalWizardMessage(session);
       PostEmbedSession.delete(guildId, userId);
       await interaction.reply({ content: `✅ Published to <#${target.id}>.`, flags: 64 });
       setTimeout(() => {
