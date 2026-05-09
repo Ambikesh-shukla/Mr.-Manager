@@ -1,4 +1,4 @@
-import { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
 import { shouldHandleInteraction } from "../../utils/instanceRouter.js";
 import { logger } from '../utils/logger.js';
 import { errorEmbed } from '../utils/embeds.js';
@@ -53,9 +53,9 @@ async function withBilling(interaction, fn) {
   const result = await deductCredit(guildId, actionKey, cost);
 
   if (!result.ok) {
-      return safeReply(interaction, {
+    return safeReply(interaction, {
       embeds: [errorEmbed(INSUFFICIENT_CREDITS_MSG)],
-      flags: 64,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -268,7 +268,7 @@ export default {
           }
         }
 
-        return undefined;
+        return;
         });
       }
 
@@ -289,7 +289,7 @@ export default {
         if (ns === 'panelselect') return handlePanelSelect(interaction, action);
         if (ns === 'ticketpriority_set') return handlePrioritySet(interaction, action);
         if (ns === 'noop') return interaction.deferUpdate();
-        return undefined;
+        return;
         });
       }
 
@@ -388,14 +388,14 @@ export default {
           }
           return interaction.reply({ embeds: [successEmbed('Review Submitted', 'Your review has been posted. Thank you! 🙏')], flags: 64 });
         }
-        return undefined;
+        return;
         });
       }
 
     } catch (err) {
       logger.error(`Interaction error [${interaction.customId ?? interaction.commandName ?? 'unknown'}]: ${err.message}`, err);
       try {
-        await safeReply(interaction, { embeds: [errorEmbed('An unexpected error occurred. Please try again.')], flags: 64 });
+        await safeReply(interaction, { embeds: [errorEmbed('An unexpected error occurred. Please try again.')], flags: MessageFlags.Ephemeral });
       } catch {}
     }
   },
