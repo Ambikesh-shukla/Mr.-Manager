@@ -4,6 +4,8 @@ import { registerCommands } from '../handlers/registerCommands.js';
 import { primeInviteSnapshotsForClient } from '../utils/inviteTracker.js';
 import { ensureGuildCredits } from '../../utils/credits.js';
 
+const INIT_GUILD_BATCH_SIZE = 10;
+
 export default {
   name: 'clientReady',
   once: true,
@@ -20,12 +22,15 @@ export default {
     }
 
     const guildIds = [...client.guilds.cache.keys()];
-    for (const guildId of guildIds) {
-      try {
-        await ensureGuildCredits(guildId);
-      } catch (err) {
-        logger.warn(`[BILLING] Failed to initialize default credits for guild ${guildId}`, err);
-      }
+    for (let i = 0; i < guildIds.length; i += INIT_GUILD_BATCH_SIZE) {
+      const batch = guildIds.slice(i, i + INIT_GUILD_BATCH_SIZE);
+      await Promise.allSettled(batch.map(async (guildId) => {
+        try {
+          await ensureGuildCredits(guildId);
+        } catch (err) {
+          logger.warn(`[BILLING] Failed to initialize default credits for guild ${guildId}`, err);
+        }
+      }));
     }
 
     await primeInviteSnapshotsForClient(client);

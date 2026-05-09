@@ -3,6 +3,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { connectMongo, getDb } from '../database/mongo.js';
 import { logger } from '../bot/utils/logger.js';
+import { unwrapFindOneAndUpdateResult } from './mongoResult.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REDEEM_CODES_PATH = join(__dirname, '../config/redeemCodes.json');
@@ -13,7 +14,7 @@ const PLAN_REWARDS = Object.freeze({
   pro: -1,
 });
 const PLAN_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
-let hasAttemptedOnDemandSeedSync = false;
+let onDemandSeedSyncPromise = null;
 
 async function getDbWithReconnect() {
   try {
@@ -30,6 +31,19 @@ async function getDbWithReconnect() {
 
 function normalizeCode(code) {
   return String(code ?? '').trim().toLowerCase();
+}
+
+async function ensureOnDemandSeedSyncOnce() {
+  if (!onDemandSeedSyncPromise) {
+    onDemandSeedSyncPromise = (async () => {
+      try {
+        await syncRedeemCodesFromSeed();
+      } catch (err) {
+        logger.warn('[REDEEM] Failed to sync/reload redeem codes before validation', err);
+      }
+    })();
+  }
+  await onDemandSeedSyncPromise;
 }
 
 function normalizeSeedCode(rawCode) {
@@ -101,14 +115,9 @@ export async function redeemCodeForGuild({ code, guildId, userId }) {
   const codesCollection = db.collection(REDEEM_CODES_COLLECTION);
 
   let existing = await codesCollection.findOne({ code: normalizedCode });
-  if (!existing && !hasAttemptedOnDemandSeedSync) {
-    hasAttemptedOnDemandSeedSync = true;
-    try {
-      await syncRedeemCodesFromSeed();
-      existing = await codesCollection.findOne({ code: normalizedCode });
-    } catch (err) {
-      logger.warn('[REDEEM] Failed to sync/reload redeem codes before validation', err);
-    }
+  if (!existing) {
+    await ensureOnDemandSeedSyncOnce();
+    existing = await codesCollection.findOne({ code: normalizedCode });
   }
   if (!existing) return { ok: false, reason: 'not_found' };
   if (!existing.active) return { ok: false, reason: 'inactive' };
@@ -201,8 +210,4 @@ export async function redeemCodeForGuild({ code, guildId, userId }) {
     usedCount: atomicResult.usedCount ?? (usedCount + 1),
     maxUses: atomicResult.maxUses ?? maxUses,
   };
-}
-function unwrapFindOneAndUpdateResult(result) {
-  if (!result) return null;
-  return result?.value ?? result;
 }

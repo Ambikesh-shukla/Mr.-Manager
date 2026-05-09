@@ -1,15 +1,11 @@
 import { connectMongo, getDb } from '../database/mongo.js';
 import { logger } from '../bot/utils/logger.js';
+import { unwrapFindOneAndUpdateResult } from './mongoResult.js';
 
 const GUILDS = 'guilds';
 const TRANSACTIONS = 'credit_transactions';
 const DEFAULT_PLAN = 'free';
 const DEFAULT_CREDITS = 50;
-
-function unwrapFindOneAndUpdateResult(result) {
-  if (!result) return null;
-  return result?.value ?? result;
-}
 
 async function getDbWithReconnect() {
   try {
