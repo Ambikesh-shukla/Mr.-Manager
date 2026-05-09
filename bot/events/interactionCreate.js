@@ -45,7 +45,7 @@ const NO_CREDITS_MSG = '❌ This server does not have enough credits. Use `/cred
 async function withBilling(interaction, fn) {
   const { shouldCharge, actionKey, cost } = getBillingDecision(interaction);
 
-  if (!shouldCharge || !interaction.inGuild?.()) {
+  if (!shouldCharge || !interaction.inGuild()) {
     return fn();
   }
 
@@ -63,7 +63,7 @@ async function withBilling(interaction, fn) {
     return await fn();
   } catch (err) {
     await refundCredit(guildId, actionKey, cost);
-    logger.warn(`[BILLING] Refunded ${cost} credit(s) for "${actionKey}" after action failure in guild ${guildId}`);
+    logger.info(`[BILLING] Refunded ${cost} credit(s) for "${actionKey}" after action failure in guild ${guildId}`);
     throw err;
   }
 }
@@ -83,7 +83,7 @@ export default {
       if (interaction.isChatInputCommand()) {
         const cmd = client.commands.get(interaction.commandName);
         if (!cmd) {
-          return interaction.reply({ embeds: [errorEmbed(`Command \`/${interaction.commandName}\` not found.`)], flags: 64 });
+          return safeReply(interaction, { embeds: [errorEmbed(`Command \`/${interaction.commandName}\` not found.`)], flags: 64 });
         }
 
         // ── Centralized permission check ─────────────────────────────────────
@@ -114,7 +114,7 @@ export default {
           } else {
             msg = `You need **Administrator** permission to use \`/${cmd.data.name}\`.`;
           }
-          return interaction.reply({ embeds: [errorEmbed(msg)], flags: 64 });
+          return safeReply(interaction, { embeds: [errorEmbed(msg)], flags: 64 });
         }
 
         logger.info(`Command: /${interaction.commandName} by ${interaction.user.tag}`);
@@ -392,9 +392,7 @@ export default {
     } catch (err) {
       logger.error(`Interaction error [${interaction.customId ?? interaction.commandName ?? 'unknown'}]: ${err.message}`, err);
       try {
-        const msg = { embeds: [errorEmbed('An unexpected error occurred. Please try again.')], flags: 64 };
-        if (interaction.replied || interaction.deferred) await interaction.followUp(msg);
-        else await interaction.reply(msg);
+        await safeReply(interaction, { embeds: [errorEmbed('An unexpected error occurred. Please try again.')], flags: 64 });
       } catch {}
     }
   },

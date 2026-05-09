@@ -56,7 +56,10 @@ export async function deductCredit(guildId, actionKey, cost = 1) {
     }
 
     await _logTransaction(guildId, 'deduct', actionKey, cost);
-    return { ok: true, remaining: updated.credits };
+    const remaining = Number.isFinite(updatedDoc?.credits)
+      ? updatedDoc.credits
+      : updatedDoc?.value?.credits;
+    return { ok: true, remaining };
   } catch (err) {
     logger.error('[BILLING] deductCredit error', err);
     return { ok: false, reason: 'error' };

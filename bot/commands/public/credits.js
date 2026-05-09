@@ -7,7 +7,7 @@ export default {
     .setName('credits')
     .setDescription("View this server's credit balance, plan details, and usage history"),
 
-  defaultLevel: 'admin',
+  defaultLevel: 'public',
 
   async execute(interaction) {
     if (!interaction.inGuild()) {
@@ -26,7 +26,7 @@ export default {
       getTotalUsed(guildId),
     ]);
 
-    const plan = guildInfo?.plan ?? 'none';
+    const plan = String(guildInfo?.plan ?? 'none');
     const credits = guildInfo?.credits ?? 0;
     const planExpiresAt = guildInfo?.planExpiresAt;
 
@@ -53,7 +53,7 @@ export default {
           title: '💳 Server Credits',
           color: isPro ? Colors.gold : Colors.primary,
           fields: [
-            { name: '📦 Plan', value: plan === 'none' ? 'None' : plan.toUpperCase(), inline: true },
+            { name: '📦 Plan', value: plan === 'none' ? 'None' : String(plan).toUpperCase(), inline: true },
             { name: '💳 Remaining Credits', value: creditsDisplay, inline: true },
             { name: '📊 Total Used', value: String(totalUsed), inline: true },
             { name: '📅 Plan Expiry', value: expiryDisplay, inline: false },
