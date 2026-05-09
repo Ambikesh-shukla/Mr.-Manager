@@ -23,8 +23,24 @@ function parseBillCustomId(customId) {
   return normalizeActionKey(actionKey ?? null);
 }
 
+function parseKnownCustomId(customId) {
+  if (!customId || typeof customId !== 'string') return null;
+  const [ns, action, target] = customId.trim().split(':');
+
+  if (ns === 'panel' && action === 'open') return normalizeActionKey('ticket.open');
+  if (ns === 'ticketopentype') return normalizeActionKey('ticket.open');
+  if (ns === 'ticket' && action === 'close') return normalizeActionKey('ticket.close');
+  if (ns === 'ticket' && action === 'delete') return normalizeActionKey('ticket.delete');
+  if (ns === 'post' && action === 'embed' && target === 'publish') return normalizeActionKey('post.embed');
+  if (ns === 'server' && action === 'btn' && target === 'create') return normalizeActionKey('server.create');
+  if (ns === 'server' && action === 'modal' && target === 'admin_manual_create') return normalizeActionKey('server.create');
+
+  return null;
+}
+
 function parseComponentActionKey(interaction) {
-  return parseBillCustomId(interaction?.customId);
+  const customId = interaction?.customId;
+  return parseBillCustomId(customId) ?? parseKnownCustomId(customId);
 }
 
 export function detectActionKey(interaction) {
