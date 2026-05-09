@@ -6,6 +6,11 @@ const TRANSACTIONS = 'credit_transactions';
 const DEFAULT_PLAN = 'free';
 const DEFAULT_CREDITS = 50;
 
+function unwrapFindOneAndUpdateResult(result) {
+  if (!result) return null;
+  return result?.value ?? result;
+}
+
 async function getDbWithReconnect() {
   try {
     return getDb();
@@ -26,7 +31,7 @@ export async function ensureGuildCredits(guildId) {
   if (!db) return null;
 
   const now = new Date();
-  return db.collection(GUILDS).findOneAndUpdate(
+  const result = await db.collection(GUILDS).findOneAndUpdate(
     { guildId },
     {
       $setOnInsert: {
@@ -41,6 +46,7 @@ export async function ensureGuildCredits(guildId) {
     },
     { upsert: true, returnDocument: 'after' },
   );
+  return unwrapFindOneAndUpdateResult(result);
 }
 
 /**
@@ -85,11 +91,12 @@ export async function deductCredit(guildId, actionKey, cost = 1) {
     }
 
     // Atomic decrement guarded by credit balance.
-    const updatedDoc = await db.collection(GUILDS).findOneAndUpdate(
+    const updateResult = await db.collection(GUILDS).findOneAndUpdate(
       { guildId, credits: { $gte: cost } },
       { $inc: { credits: -cost, totalUsed: cost }, $set: { updatedAt: new Date() } },
       { returnDocument: 'after' },
     );
+    const updatedDoc = unwrapFindOneAndUpdateResult(updateResult);
 
     if (!updatedDoc) {
       return { ok: false, reason: 'insufficient_credits' };

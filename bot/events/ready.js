@@ -20,13 +20,13 @@ export default {
     }
 
     const guildIds = [...client.guilds.cache.keys()];
-    await Promise.all(guildIds.map(async (guildId) => {
+    for (const guildId of guildIds) {
       try {
         await ensureGuildCredits(guildId);
       } catch (err) {
         logger.warn(`[BILLING] Failed to initialize default credits for guild ${guildId}`, err);
       }
-    }));
+    }
 
     await primeInviteSnapshotsForClient(client);
   },

@@ -13,6 +13,7 @@ const PLAN_REWARDS = Object.freeze({
   pro: -1,
 });
 const PLAN_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
+let hasAttemptedOnDemandSeedSync = false;
 
 async function getDbWithReconnect() {
   try {
@@ -100,7 +101,8 @@ export async function redeemCodeForGuild({ code, guildId, userId }) {
   const codesCollection = db.collection(REDEEM_CODES_COLLECTION);
 
   let existing = await codesCollection.findOne({ code: normalizedCode });
-  if (!existing) {
+  if (!existing && !hasAttemptedOnDemandSeedSync) {
+    hasAttemptedOnDemandSeedSync = true;
     try {
       await syncRedeemCodesFromSeed();
       existing = await codesCollection.findOne({ code: normalizedCode });
@@ -129,7 +131,7 @@ export async function redeemCodeForGuild({ code, guildId, userId }) {
     redeemedAt: now,
   };
 
-  const atomicResult = await codesCollection.findOneAndUpdate(
+  const updateResult = await codesCollection.findOneAndUpdate(
     {
       code: normalizedCode,
       active: true,
@@ -165,6 +167,7 @@ export async function redeemCodeForGuild({ code, guildId, userId }) {
     { returnDocument: 'after' },
   );
 
+  const atomicResult = unwrapFindOneAndUpdateResult(updateResult);
   if (!atomicResult) {
     return { ok: false, reason: 'max_uses_reached' };
   }
@@ -198,4 +201,8 @@ export async function redeemCodeForGuild({ code, guildId, userId }) {
     usedCount: atomicResult.usedCount ?? (usedCount + 1),
     maxUses: atomicResult.maxUses ?? maxUses,
   };
+}
+function unwrapFindOneAndUpdateResult(result) {
+  if (!result) return null;
+  return result?.value ?? result;
 }
