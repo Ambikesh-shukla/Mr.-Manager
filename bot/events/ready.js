@@ -24,13 +24,16 @@ export default {
     const guildIds = [...client.guilds.cache.keys()];
     for (let i = 0; i < guildIds.length; i += INIT_GUILD_BATCH_SIZE) {
       const batch = guildIds.slice(i, i + INIT_GUILD_BATCH_SIZE);
-      await Promise.allSettled(batch.map(async (guildId) => {
-        try {
-          await ensureGuildCredits(guildId);
-        } catch (err) {
-          logger.warn(`[BILLING] Failed to initialize default credits for guild ${guildId}`, err);
-        }
+      const results = await Promise.allSettled(batch.map(async (guildId) => {
+        await ensureGuildCredits(guildId);
       }));
+
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          const guildId = batch[index];
+          logger.warn(`[BILLING] Failed to initialize default credits for guild ${guildId}`, result.reason);
+        }
+      });
     }
 
     await primeInviteSnapshotsForClient(client);

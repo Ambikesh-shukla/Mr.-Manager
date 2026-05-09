@@ -10,11 +10,13 @@ const DEFAULT_CREDITS = 50;
 async function getDbWithReconnect() {
   try {
     return getDb();
-  } catch {
+  } catch (err) {
+    logger.warn('[BILLING] MongoDB handle unavailable, attempting reconnect.', err);
     try {
       await connectMongo();
       return getDb();
-    } catch {
+    } catch (reconnectErr) {
+      logger.error('[BILLING] MongoDB reconnect failed.', reconnectErr);
       return null;
     }
   }

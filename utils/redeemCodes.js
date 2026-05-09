@@ -19,11 +19,13 @@ let onDemandSeedSyncPromise = null;
 async function getDbWithReconnect() {
   try {
     return getDb();
-  } catch {
+  } catch (err) {
+    logger.warn('[REDEEM] MongoDB handle unavailable, attempting reconnect.', err);
     try {
       await connectMongo();
       return getDb();
-    } catch {
+    } catch (reconnectErr) {
+      logger.error('[REDEEM] MongoDB reconnect failed.', reconnectErr);
       return null;
     }
   }
