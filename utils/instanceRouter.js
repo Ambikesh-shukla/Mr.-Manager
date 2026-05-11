@@ -1,6 +1,7 @@
 import { redis, INSTANCE_ID } from "./redis.js";
 
 const LOCK_TTL_SECONDS = Number(process.env.LOCK_TTL_SECONDS || 60);
+const ROUTER_FALLBACK_DELAY_MS = Number(process.env.ROUTER_FALLBACK_DELAY_MS || 350);
 const DEBUG = process.env.CLUSTER_DEBUG === "true";
 
 const LIGHT_COMMANDS = new Set([
@@ -12,6 +13,24 @@ const LIGHT_COMMANDS = new Set([
   "noop",
 ]);
 
+const MIDDLE_COMMANDS = new Set([
+  "ticket",
+  "ticketopentype",
+  "ticketmodal",
+  "ticketclose",
+  "ticketadduser",
+  "ticketremoveuser",
+  "ticketrename",
+  "panel",
+  "panelselect",
+  "setup",
+  "setup-ticket",
+  "welcome",
+  "autoresponse",
+  "review",
+  "plan_buy",
+]);
+
 const HEAVY_COMMANDS = new Set([
   "admin",
   "plan",
@@ -19,8 +38,30 @@ const HEAVY_COMMANDS = new Set([
   "command-lock",
 ]);
 
-const HEAVY_ORDER = ["vps_3gb", "vps_512_a", "vps_512_b"];
-const NORMAL_ORDER = ["vps_512_a", "vps_512_b", "vps_3gb"];
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function hashString(input) {
+  let hash = 0;
+  const text = String(input || "");
+
+  for (let i = 0; i < text.length; i++) {
+    hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+  }
+
+  return hash;
+}
+
+function rotate(list, amount) {
+  if (!list.length) return list;
+  const cut = amount % list.length;
+  return [...list.slice(cut), ...list.slice(0, cut)];
+}
+
+function unique(list) {
+  return [...new Set(list.filter(Boolean))];
+}
 
 function getInteractionName(interaction) {
   if (interaction.isChatInputCommand?.()) {
@@ -36,26 +77,23 @@ function getInteractionName(interaction) {
 
 function getCandidateOrder(interaction) {
   const name = getInteractionName(interaction);
-  if (HEAVY_COMMANDS.has(name)) return HEAVY_ORDER;
-  if (LIGHT_COMMANDS.has(name)) return NORMAL_ORDER;
-  return NORMAL_ORDER;
-}
+  const seed = hashString(interaction.id || `${name}:${interaction.user?.id}`);
 
-async function getAliveCandidates(candidates) {
-  const checks = await Promise.all(
-    candidates.map(async (instanceId) => {
-      try {
-        // An instance is considered alive when its heartbeat key exists:
-        // `heartbeat:<instance_id>`. The heartbeat writer refreshes TTL periodically.
-        const heartbeat = await redis.get(`heartbeat:${instanceId}`);
-        return heartbeat ? instanceId : null;
-      } catch {
-        return null;
-      }
-    }),
-  );
+  const fastPool = rotate(["vps_512_a", "vps_512_b"], seed);
 
-  return checks.filter(Boolean);
+  if (HEAVY_COMMANDS.has(name)) {
+    return unique(["vps_3gb", ...fastPool, "vps_256"]);
+  }
+
+  if (MIDDLE_COMMANDS.has(name)) {
+    return unique(["vps_3gb", ...fastPool, "vps_256"]);
+  }
+
+  if (LIGHT_COMMANDS.has(name)) {
+    return unique(["vps_3gb", ...fastPool, "vps_256"]);
+  }
+
+  return unique(["vps_3gb", ...fastPool, "vps_256"]);
 }
 
 // Old index.js may still call this. Keep it as no-op so server does not crash.
@@ -66,33 +104,64 @@ export function startClusterSync() {
 }
 
 export async function shouldHandleInteraction(interaction) {
-  const name = getInteractionName(interaction);
-  const candidates = getCandidateOrder(interaction);
-  const aliveCandidates = await getAliveCandidates(candidates);
-  const owner = aliveCandidates[0];
-
-  // Single-owner routing: only the first alive candidate may process this interaction.
-  // All other alive instances exit early to prevent duplicate Discord replies.
-  if (!owner || owner !== INSTANCE_ID) return false;
-
-  const lockKey = `lock:interaction:${interaction.id}`;
-
   try {
-    const lock = await redis.set(lockKey, INSTANCE_ID, {
-      nx: true,
-      ex: LOCK_TTL_SECONDS,
-    });
-
-    if (!lock) {
-      return false;
-    }
-
+    // 1. Get candidate priority list based on command type
+    const candidates = getCandidateOrder(interaction);
+    
     if (DEBUG) {
-      console.log(`[ROUTER] ${INSTANCE_ID} accepted ${name} owner=${owner}`);
+      console.log(`[ROUTER] Candidates for ${getInteractionName(interaction)}: ${candidates.join(', ')}`);
     }
-    return true;
+    
+    // 2. Check which instances are alive (heartbeat check)
+    const aliveInstances = [];
+    for (const instanceId of candidates) {
+      const heartbeat = await redis.get(`heartbeat:${instanceId}`);
+      if (heartbeat) {
+        const age = Date.now() - parseInt(heartbeat);
+        if (age < 300000) { // 5 minutes max
+          aliveInstances.push(instanceId);
+          if (DEBUG) {
+            console.log(`[ROUTER] ${instanceId} is alive (age: ${Math.floor(age/1000)}s)`);
+          }
+        } else if (DEBUG) {
+          console.log(`[ROUTER] ${instanceId} heartbeat too old (age: ${Math.floor(age/1000)}s)`);
+        }
+      } else if (DEBUG) {
+        console.log(`[ROUTER] ${instanceId} has no heartbeat`);
+      }
+    }
+    
+    // 3. If no instances alive, fallback to current instance
+    if (aliveInstances.length === 0) {
+      console.log(`[ROUTER] No alive instances, ${INSTANCE_ID} handling fallback`);
+      return true;
+    }
+    
+    // 4. Check if current instance is the first alive candidate
+    const shouldHandle = aliveInstances[0] === INSTANCE_ID;
+    
+    // 5. Redis lock to prevent race conditions (only if we should handle)
+    if (shouldHandle) {
+      const lockKey = `lock:interaction:${interaction.id}`;
+      const locked = await redis.set(lockKey, INSTANCE_ID, {
+        ex: LOCK_TTL_SECONDS,
+        nx: true // Only set if not exists
+      });
+      
+      if (!locked) {
+        console.log(`[ROUTER] ${INSTANCE_ID} lost lock race for ${getInteractionName(interaction)}`);
+        return false;
+      }
+    }
+    
+    if (DEBUG || shouldHandle) {
+      console.log(`[ROUTER] ${INSTANCE_ID} ${shouldHandle ? 'HANDLING' : 'SKIPPING'} ${getInteractionName(interaction)} (alive: ${aliveInstances.join(', ')})`);
+    }
+    
+    return shouldHandle;
   } catch (error) {
-    console.error(`[ROUTER ERROR] ${INSTANCE_ID}`, error);
-    return false;
+    // If Redis fails, fallback to handling locally
+    console.error(`[ROUTER ERROR] ${INSTANCE_ID} Redis error, handling locally:`, error.message);
+    return true;
   }
 }
