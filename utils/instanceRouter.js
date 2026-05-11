@@ -45,6 +45,8 @@ async function getAliveCandidates(candidates) {
   const checks = await Promise.all(
     candidates.map(async (instanceId) => {
       try {
+        // An instance is considered alive when its heartbeat key exists:
+        // `heartbeat:<instance_id>`. The heartbeat writer refreshes TTL periodically.
         const heartbeat = await redis.get(`heartbeat:${instanceId}`);
         return heartbeat ? instanceId : null;
       } catch {
