@@ -1,7 +1,6 @@
 import { redis, INSTANCE_ID } from "./redis.js";
 
 const LOCK_TTL_SECONDS = Number(process.env.LOCK_TTL_SECONDS || 60);
-const ROUTER_FALLBACK_DELAY_MS = Number(process.env.ROUTER_FALLBACK_DELAY_MS || 350);
 const DEBUG = process.env.CLUSTER_DEBUG === "true";
 
 const LIGHT_COMMANDS = new Set([
@@ -13,24 +12,6 @@ const LIGHT_COMMANDS = new Set([
   "noop",
 ]);
 
-const MIDDLE_COMMANDS = new Set([
-  "ticket",
-  "ticketopentype",
-  "ticketmodal",
-  "ticketclose",
-  "ticketadduser",
-  "ticketremoveuser",
-  "ticketrename",
-  "panel",
-  "panelselect",
-  "setup",
-  "setup-ticket",
-  "welcome",
-  "autoresponse",
-  "review",
-  "plan_buy",
-]);
-
 const HEAVY_COMMANDS = new Set([
   "admin",
   "plan",
@@ -38,30 +19,8 @@ const HEAVY_COMMANDS = new Set([
   "command-lock",
 ]);
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function hashString(input) {
-  let hash = 0;
-  const text = String(input || "");
-
-  for (let i = 0; i < text.length; i++) {
-    hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
-  }
-
-  return hash;
-}
-
-function rotate(list, amount) {
-  if (!list.length) return list;
-  const cut = amount % list.length;
-  return [...list.slice(cut), ...list.slice(0, cut)];
-}
-
-function unique(list) {
-  return [...new Set(list.filter(Boolean))];
-}
+const HEAVY_ORDER = ["vps_3gb", "vps_512_a", "vps_512_b"];
+const NORMAL_ORDER = ["vps_512_a", "vps_512_b", "vps_3gb"];
 
 function getInteractionName(interaction) {
   if (interaction.isChatInputCommand?.()) {
@@ -77,23 +36,24 @@ function getInteractionName(interaction) {
 
 function getCandidateOrder(interaction) {
   const name = getInteractionName(interaction);
-  const seed = hashString(interaction.id || `${name}:${interaction.user?.id}`);
+  if (HEAVY_COMMANDS.has(name)) return HEAVY_ORDER;
+  if (LIGHT_COMMANDS.has(name)) return NORMAL_ORDER;
+  return NORMAL_ORDER;
+}
 
-  const fastPool = rotate(["vps_512_a", "vps_512_b"], seed);
+async function getAliveCandidates(candidates) {
+  const checks = await Promise.all(
+    candidates.map(async (instanceId) => {
+      try {
+        const heartbeat = await redis.get(`heartbeat:${instanceId}`);
+        return heartbeat ? instanceId : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
 
-  if (HEAVY_COMMANDS.has(name)) {
-    return unique(["vps_3gb", ...fastPool, "vps_256"]);
-  }
-
-  if (MIDDLE_COMMANDS.has(name)) {
-    return unique([...fastPool, "vps_256", "vps_3gb"]);
-  }
-
-  if (LIGHT_COMMANDS.has(name)) {
-    return unique([...fastPool, "vps_256", "vps_3gb"]);
-  }
-
-  return unique([...fastPool, "vps_256", "vps_3gb"]);
+  return checks.filter(Boolean);
 }
 
 // Old index.js may still call this. Keep it as no-op so server does not crash.
@@ -106,15 +66,10 @@ export function startClusterSync() {
 export async function shouldHandleInteraction(interaction) {
   const name = getInteractionName(interaction);
   const candidates = getCandidateOrder(interaction);
-  const myIndex = candidates.indexOf(INSTANCE_ID);
+  const aliveCandidates = await getAliveCandidates(candidates);
+  const owner = aliveCandidates[0];
 
-  if (myIndex === -1) {
-    return false;
-  }
-
-  if (myIndex > 0) {
-    await sleep(myIndex * ROUTER_FALLBACK_DELAY_MS);
-  }
+  if (!owner || owner !== INSTANCE_ID) return false;
 
   const lockKey = `lock:interaction:${interaction.id}`;
 
@@ -128,7 +83,9 @@ export async function shouldHandleInteraction(interaction) {
       return false;
     }
 
-    console.log(`[ROUTER] ${INSTANCE_ID} accepted ${name}`);
+    if (DEBUG) {
+      console.log(`[ROUTER] ${INSTANCE_ID} accepted ${name} owner=${owner}`);
+    }
     return true;
   } catch (error) {
     console.error(`[ROUTER ERROR] ${INSTANCE_ID}`, error);
