@@ -71,6 +71,8 @@ export async function shouldHandleInteraction(interaction) {
   const aliveCandidates = await getAliveCandidates(candidates);
   const owner = aliveCandidates[0];
 
+  // Single-owner routing: only the first alive candidate may process this interaction.
+  // All other alive instances exit early to prevent duplicate Discord replies.
   if (!owner || owner !== INSTANCE_ID) return false;
 
   const lockKey = `lock:interaction:${interaction.id}`;
