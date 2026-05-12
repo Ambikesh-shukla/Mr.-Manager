@@ -11,16 +11,13 @@ export default {
 
   async execute(interaction) {
     if (!interaction.inGuild()) {
-      if (interaction.deferred || interaction.replied) {
-        return interaction.followUp({
-          embeds: [errorEmbed('This command can only be used in a server.')],
-          flags: MessageFlags.Ephemeral,
-        });
-      }
-      return interaction.reply({
+      const payload = {
         embeds: [errorEmbed('This command can only be used in a server.')],
         flags: MessageFlags.Ephemeral,
-      });
+      };
+      return interaction.deferred || interaction.replied
+        ? interaction.followUp(payload)
+        : interaction.reply(payload);
     }
 
     if (!interaction.deferred && !interaction.replied) {

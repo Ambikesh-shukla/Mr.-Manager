@@ -35,12 +35,22 @@ import { handlePostEmbedButton } from '../handlers/postHandler.js';
 const INSUFFICIENT_CREDITS_MSG = '❌ This server does not have enough credits. Use `/credits` or `/redeem`.';
 const EARLY_DEFER_COMMANDS = new Set(['ping', 'credits', 'purge']);
 
+/**
+ * Early-defer only known longer slash commands so Discord shows "thinking"
+ * quickly while avoiding global component/modal acknowledgement side effects.
+ *
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ */
 async function maybeEarlyDeferSlash(interaction) {
   if (!interaction.isChatInputCommand()) return;
   if (!EARLY_DEFER_COMMANDS.has(interaction.commandName)) return;
   if (interaction.deferred || interaction.replied) return;
 
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  } catch (error) {
+    logger.warn(`[ROUTER] Early defer failed for /${interaction.commandName}: ${error.message}`);
+  }
 }
 
 /**

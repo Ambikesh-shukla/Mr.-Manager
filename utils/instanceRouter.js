@@ -61,6 +61,13 @@ function unique(list) {
   return [...new Set(list.filter(Boolean))];
 }
 
+/**
+ * Reads candidate instance heartbeats with batched mget when available,
+ * then falls back to sequential get calls if batching is unavailable/fails.
+ *
+ * @param {string[]} candidates
+ * @returns {Promise<unknown[]>}
+ */
 async function readHeartbeats(candidates) {
   const keys = candidates.map((instanceId) => `heartbeat:${instanceId}`);
 
@@ -188,8 +195,7 @@ export async function shouldHandleInteraction(interaction) {
     
     return shouldHandle;
   } catch (error) {
-    console.error(`[ROUTER ERROR] ${INSTANCE_ID} Redis error, skipping interaction:`, error.message);
-    console.error(`[ROUTER ALERT] Interaction ${interaction.id} dropped due to router Redis failure`);
+    console.error(`[ROUTER ALERT] ${INSTANCE_ID} Redis error, dropping interaction ${interaction.id}: ${error.message}`);
     return false;
   }
 }
