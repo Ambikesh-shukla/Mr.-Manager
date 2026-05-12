@@ -161,6 +161,9 @@ export async function shouldHandleInteraction(interaction) {
     
     // 3. Selected handler should acquire lock
     const shouldAttemptLock = aliveInstances.length === 0 || aliveInstances[0] === INSTANCE_ID;
+    if (aliveInstances.length === 0) {
+      console.warn(`[ROUTER] No alive heartbeat candidates for ${getInteractionName(interaction)}; attempting lock fallback`);
+    }
     let shouldHandle = false;
 
     if (shouldAttemptLock) {
@@ -186,6 +189,7 @@ export async function shouldHandleInteraction(interaction) {
     return shouldHandle;
   } catch (error) {
     console.error(`[ROUTER ERROR] ${INSTANCE_ID} Redis error, skipping interaction:`, error.message);
+    console.error(`[ROUTER ALERT] Interaction ${interaction.id} dropped due to router Redis failure`);
     return false;
   }
 }
