@@ -11,13 +11,18 @@ export default {
 
   async execute(interaction) {
     if (!interaction.inGuild()) {
-      return interaction.reply({
+      const payload = {
         embeds: [errorEmbed('This command can only be used in a server.')],
         flags: MessageFlags.Ephemeral,
-      });
+      };
+      return interaction.deferred || interaction.replied
+        ? interaction.followUp(payload)
+        : interaction.reply(payload);
     }
 
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    }
 
     const guildId = interaction.guildId;
     const [guildInfo, topActions, totalUsed] = await Promise.all([

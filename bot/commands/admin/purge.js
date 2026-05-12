@@ -24,7 +24,9 @@ export default {
     if (sub === 'all') {
       const amount = interaction.options.getInteger('amount');
 
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      }
 
       if (!interaction.channel.permissionsFor(interaction.guild.members.me).has(PermissionFlagsBits.ManageMessages)) {
         return interaction.editReply({ embeds: [errorEmbed('I need the **Manage Messages** permission to delete messages.')] });
