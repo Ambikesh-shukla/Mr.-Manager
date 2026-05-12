@@ -1,7 +1,5 @@
 import { redis, INSTANCE_ID } from "./redis.js";
 
-const LOCK_TTL_SECONDS = Number(process.env.LOCK_TTL_SECONDS || 60);
-const ROUTER_FALLBACK_DELAY_MS = Number(process.env.ROUTER_FALLBACK_DELAY_MS || 350);
 const DEBUG = process.env.CLUSTER_DEBUG === "true";
 
 const LIGHT_COMMANDS = new Set([
@@ -63,6 +61,34 @@ function unique(list) {
   return [...new Set(list.filter(Boolean))];
 }
 
+async function readHeartbeats(candidates) {
+  const keys = candidates.map((instanceId) => `heartbeat:${instanceId}`);
+
+  if (typeof redis.mget === "function") {
+    try {
+      const values = await redis.mget(keys);
+      if (Array.isArray(values) && values.length === candidates.length) {
+        if (DEBUG) {
+          console.log(`[HEARTBEAT] mget batch lookup success for ${candidates.length} instance(s)`);
+        }
+        return values;
+      }
+    } catch (error) {
+      console.warn(`[HEARTBEAT] mget failed, falling back to sequential checks: ${error.message}`);
+    }
+  }
+
+  if (DEBUG) {
+    console.log("[HEARTBEAT] using sequential heartbeat checks");
+  }
+
+  const values = [];
+  for (const key of keys) {
+    values.push(await redis.get(key));
+  }
+  return values;
+}
+
 function getInteractionName(interaction) {
   if (interaction.isChatInputCommand?.()) {
     return interaction.commandName || "unknown";
@@ -113,45 +139,44 @@ export async function shouldHandleInteraction(interaction) {
     }
     
     // 2. Check which instances are alive (heartbeat check)
+    const heartbeatValues = await readHeartbeats(candidates);
     const aliveInstances = [];
-    for (const instanceId of candidates) {
-      const heartbeat = await redis.get(`heartbeat:${instanceId}`);
+    for (let i = 0; i < candidates.length; i++) {
+      const instanceId = candidates[i];
+      const heartbeat = heartbeatValues[i];
       if (heartbeat) {
         const age = Date.now() - parseInt(heartbeat);
         if (age < 300000) { // 5 minutes max
           aliveInstances.push(instanceId);
           if (DEBUG) {
-            console.log(`[ROUTER] ${instanceId} is alive (age: ${Math.floor(age/1000)}s)`);
+            console.log(`[HEARTBEAT] ${instanceId} is alive (age: ${Math.floor(age/1000)}s)`);
           }
         } else if (DEBUG) {
-          console.log(`[ROUTER] ${instanceId} heartbeat too old (age: ${Math.floor(age/1000)}s)`);
+          console.log(`[HEARTBEAT] ${instanceId} heartbeat too old (age: ${Math.floor(age/1000)}s)`);
         }
       } else if (DEBUG) {
-        console.log(`[ROUTER] ${instanceId} has no heartbeat`);
+        console.log(`[HEARTBEAT] ${instanceId} has no heartbeat`);
       }
     }
     
-    // 3. If no instances alive, fallback to current instance
-    if (aliveInstances.length === 0) {
-      console.log(`[ROUTER] No alive instances, ${INSTANCE_ID} handling fallback`);
-      return true;
-    }
-    
-    // 4. Check if current instance is the first alive candidate
-    const shouldHandle = aliveInstances[0] === INSTANCE_ID;
-    
-    // 5. Redis lock to prevent race conditions (only if we should handle)
-    if (shouldHandle) {
+    // 3. Selected handler should acquire lock
+    const shouldAttemptLock = aliveInstances.length === 0 || aliveInstances[0] === INSTANCE_ID;
+    let shouldHandle = false;
+
+    if (shouldAttemptLock) {
       const lockKey = `lock:interaction:${interaction.id}`;
       const locked = await redis.set(lockKey, INSTANCE_ID, {
-        ex: LOCK_TTL_SECONDS,
-        nx: true // Only set if not exists
+        nx: true,
+        ex: 60,
       });
       
       if (!locked) {
-        console.log(`[ROUTER] ${INSTANCE_ID} lost lock race for ${getInteractionName(interaction)}`);
+        console.log(`[LOCK] ${INSTANCE_ID} failed lock for ${getInteractionName(interaction)}`);
         return false;
       }
+
+      console.log(`[LOCK] ${INSTANCE_ID} lock success for ${getInteractionName(interaction)}`);
+      shouldHandle = true;
     }
     
     if (DEBUG || shouldHandle) {
@@ -160,8 +185,7 @@ export async function shouldHandleInteraction(interaction) {
     
     return shouldHandle;
   } catch (error) {
-    // If Redis fails, fallback to handling locally
-    console.error(`[ROUTER ERROR] ${INSTANCE_ID} Redis error, handling locally:`, error.message);
-    return true;
+    console.error(`[ROUTER ERROR] ${INSTANCE_ID} Redis error, skipping interaction:`, error.message);
+    return false;
   }
 }

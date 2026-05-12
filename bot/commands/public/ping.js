@@ -10,7 +10,9 @@ export default {
 
   async execute(interaction) {
     const start = Date.now();
-    await interaction.deferReply({ flags: 64 });
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.deferReply({ flags: 64 });
+    }
     const latency = Date.now() - start;
     const ws = interaction.client.ws.ping;
     await interaction.editReply({
