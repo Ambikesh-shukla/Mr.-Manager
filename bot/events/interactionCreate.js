@@ -39,6 +39,9 @@ const INSUFFICIENT_CREDITS_MSG = '❌ This server does not have enough credits. 
  * and refunds if the action throws.  Free actions (cost=0) and DM interactions
  * are always passed through without any DB calls.
  *
+ * For paid slash commands the interaction is deferred ephemerally before the
+ * MongoDB billing check so we never miss Discord's 3-second response window.
+ *
  * @param {import('discord.js').Interaction} interaction
  * @param {() => Promise<unknown>} fn - The interaction handler to execute.
  */
@@ -50,14 +53,27 @@ async function withBilling(interaction, fn) {
   }
 
   const guildId = interaction.guildId;
+
+  // For paid slash commands, defer ephemerally before billing so the MongoDB
+  // round-trip never causes Discord to drop the interaction token (3-second window).
+  const isSlash = typeof interaction.isChatInputCommand === 'function' && interaction.isChatInputCommand();
+  if (isSlash && !interaction.deferred && !interaction.replied) {
+    logger.info(`[BILLING] Deferring reply for paid slash command "${actionKey}" in guild ${guildId}`);
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  }
+
+  logger.info(`[BILLING] Checking credits for guild ${guildId} action "${actionKey}" (cost: ${cost})`);
   const result = await deductCredit(guildId, actionKey, cost);
 
   if (!result.ok) {
+    logger.info(`[BILLING] Credit check failed for guild ${guildId} action "${actionKey}" reason: ${result.reason}`);
     return safeReply(interaction, {
       embeds: [errorEmbed(INSUFFICIENT_CREDITS_MSG)],
       flags: MessageFlags.Ephemeral,
     });
   }
+
+  logger.info(`[BILLING] Credit check passed for guild ${guildId} action "${actionKey}"`);
 
   try {
     return await fn();

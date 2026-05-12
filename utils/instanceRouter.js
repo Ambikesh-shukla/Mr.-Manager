@@ -145,12 +145,15 @@ export async function shouldHandleInteraction(interaction) {
       const lockKey = `lock:interaction:${interaction.id}`;
       const locked = await redis.set(lockKey, INSTANCE_ID, {
         ex: LOCK_TTL_SECONDS,
-        nx: true // Only set if not exists
+        nx: true // Only set if not exists — atomic lock
       });
       
       if (!locked) {
-        console.log(`[ROUTER] ${INSTANCE_ID} lost lock race for ${getInteractionName(interaction)}`);
+        console.log(`[LOCK] ${INSTANCE_ID} lost lock race for ${getInteractionName(interaction)} — skipping`);
         return false;
+      }
+      if (DEBUG) {
+        console.log(`[LOCK] ${INSTANCE_ID} acquired lock for ${getInteractionName(interaction)}`);
       }
     }
     

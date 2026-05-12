@@ -3,6 +3,7 @@ import { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Chan
 import { Plan } from '../../storage/Plan.js';
 import { GuildConfig } from '../../storage/GuildConfig.js';
 import { successEmbed, errorEmbed, planEmbed, embed, Colors } from '../../utils/embeds.js';
+import { safeReply } from '../../../utils/safeReply.js';
 
 function buyButtonFor(plan) {
   return new ButtonBuilder()
@@ -77,13 +78,13 @@ export default {
       try {
         await targetCh.send({ embeds: [planEmbed(plan)], components: [row] });
       } catch {
-        return interaction.reply({
+        return safeReply(interaction, {
           embeds: [errorEmbed(`Plan saved (ID \`${plan.id}\`) but I couldn't post in <#${targetCh.id}>. Check my **Send Messages** + **Embed Links** permissions there.`)],
           flags: 64,
         });
       }
 
-      return interaction.reply({
+      return safeReply(interaction, {
         embeds: [successEmbed('Plan Created', `Plan **${plan.name}** posted in <#${targetCh.id}>.\nID: \`${plan.id}\``)],
         flags: 64,
       });
@@ -94,24 +95,24 @@ export default {
       const id = interaction.options.getString('plan_id');
       const plan = Plan.get(id);
       if (!plan || plan.guildId !== interaction.guild.id) {
-        return interaction.reply({ embeds: [errorEmbed('Plan not found.')], flags: 64 });
+        return safeReply(interaction, { embeds: [errorEmbed('Plan not found.')], flags: 64 });
       }
       Plan.delete(id);
-      return interaction.reply({ embeds: [successEmbed('Plan Deleted', `Plan **${plan.name}** has been deleted.`)], flags: 64 });
+      return safeReply(interaction, { embeds: [successEmbed('Plan Deleted', `Plan **${plan.name}** has been deleted.`)], flags: 64 });
     }
 
     // ── list ───────────────────────────────────────────────────────────────
     if (sub === 'list') {
       const plans = Plan.forGuild(interaction.guild.id).filter(p => p.available);
       if (plans.length === 0) {
-        return interaction.reply({ embeds: [embed({ description: 'No plans configured yet. Use `/plan create`.', color: Colors.warning })], flags: 64 });
+        return safeReply(interaction, { embeds: [embed({ description: 'No plans configured yet. Use `/plan create`.', color: Colors.warning })], flags: 64 });
       }
       const isPublic = interaction.options.getBoolean('public') ?? false;
       const embeds = plans.slice(0, 10).map(p => planEmbed(p));
       const buttons = plans.slice(0, 5).map(p => buyButtonFor(p));
       const rows = [];
       for (let i = 0; i < buttons.length; i += 5) rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
-      return interaction.reply({ embeds, components: rows, flags: isPublic ? undefined : 64 });
+      return safeReply(interaction, { embeds, components: rows, flags: isPublic ? undefined : 64 });
     }
 
   },

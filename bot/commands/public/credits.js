@@ -1,6 +1,6 @@
 import { SlashCommandBuilder, MessageFlags } from 'discord.js';
 import { embed, Colors, errorEmbed } from '../../utils/embeds.js';
-import { getGuildInfo, getTopActions, getTotalUsed } from '../../../utils/credits.js';
+import { getGuildInfoCached, getTopActions, getTotalUsed } from '../../../utils/credits.js';
 
 export default {
   data: new SlashCommandBuilder()
@@ -21,7 +21,7 @@ export default {
 
     const guildId = interaction.guildId;
     const [guildInfo, topActions, totalUsed] = await Promise.all([
-      getGuildInfo(guildId),
+      getGuildInfoCached(guildId),
       getTopActions(guildId, 5),
       getTotalUsed(guildId),
     ]);

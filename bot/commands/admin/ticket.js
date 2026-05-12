@@ -6,6 +6,7 @@ import { errorEmbed, successEmbed } from '../../utils/embeds.js';
 import { isAdmin } from '../../utils/permissions.js';
 import { startSetup } from '../../handlers/setupHandler.js';
 import { logger } from '../../utils/logger.js';
+import { safeReply } from '../../../utils/safeReply.js';
 
 export default {
   data: new SlashCommandBuilder()
@@ -33,7 +34,7 @@ export default {
     const sub = interaction.options.getSubcommand(false);
 
     if (!isAdmin(interaction.member)) {
-      return interaction.reply({ embeds: [errorEmbed('You need **Administrator** or **Manage Server** permission.')], flags: 64 });
+      return safeReply(interaction, { embeds: [errorEmbed('You need **Administrator** or **Manage Server** permission.')], flags: 64 });
     }
 
     // ── edit ────────────────────────────────────────────────────────────────
@@ -47,7 +48,7 @@ export default {
       const panelId = interaction.options.getString('panel_id');
       const panel = TicketPanel.get(panelId);
       if (!panel || panel.guildId !== interaction.guild.id) {
-        return interaction.reply({ embeds: [errorEmbed('Panel not found.')], flags: 64 });
+        return safeReply(interaction, { embeds: [errorEmbed('Panel not found.')], flags: 64 });
       }
 
       if (panel.panelChannel && panel.messageId) {
@@ -61,7 +62,7 @@ export default {
       }
 
       TicketPanel.delete(panelId);
-      await interaction.reply({
+      await safeReply(interaction, {
         embeds: [successEmbed('Panel Deleted', `Panel **${panel.title}** has been deleted.\nThe panel message has been removed from the channel.`)],
         flags: 64,
       });

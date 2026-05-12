@@ -8,6 +8,7 @@ import { SetupSession } from '../storage/SetupSession.js';
 import { TicketPanel } from '../storage/TicketPanel.js';
 import { embed, Colors, errorEmbed, successEmbed } from '../utils/embeds.js';
 import { isAdmin } from '../utils/permissions.js';
+import { safeReply } from '../../utils/safeReply.js';
 import { randomUUID } from 'crypto';
 import { logger } from '../utils/logger.js';
 
@@ -706,7 +707,7 @@ async function finalizePanel(interaction, session, channelId) {
 
 export async function startSetup(interaction, existingPanelId = null) {
   if (!isAdmin(interaction.member)) {
-    return interaction.reply({ embeds: [errorEmbed('You need **Administrator** or **Manage Server** permission.')], flags: 64 });
+    return safeReply(interaction, { embeds: [errorEmbed('You need **Administrator** or **Manage Server** permission.')], flags: 64 });
   }
 
   let session;
@@ -714,10 +715,10 @@ export async function startSetup(interaction, existingPanelId = null) {
     // Editing an existing panel → show the full dashboard
     const panel = TicketPanel.get(existingPanelId);
     if (!panel || panel.guildId !== interaction.guild.id) {
-      return interaction.reply({ embeds: [errorEmbed('Panel not found.')], flags: 64 });
+      return safeReply(interaction, { embeds: [errorEmbed('Panel not found.')], flags: 64 });
     }
     session = SetupSession.fromPanel(interaction.guild.id, interaction.user.id, panel);
-    return interaction.reply({
+    return safeReply(interaction, {
       embeds: [buildDashboardEmbed(session)],
       components: buildDashboardComponents(),
       flags: 64,
@@ -726,7 +727,7 @@ export async function startSetup(interaction, existingPanelId = null) {
     // New panel → show the beginner-friendly wizard entry screen
     session = SetupSession.get(interaction.guild.id, interaction.user.id)
       ?? SetupSession.create(interaction.guild.id, interaction.user.id);
-    return interaction.reply({
+    return safeReply(interaction, {
       embeds: [buildWizardEmbed(session)],
       components: buildWizardComponents(),
       flags: 64,
