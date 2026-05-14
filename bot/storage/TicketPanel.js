@@ -149,7 +149,10 @@ function buildPanelIndex() {
     map.set(normalized.id, normalized);
 
     // Self-heal key mismatch if old primary entry was keyed differently
-    if (key !== normalized.id) set(COLLECTION, normalized.id, normalized);
+    if (key !== normalized.id) {
+      set(COLLECTION, normalized.id, normalized);
+      del(COLLECTION, key);
+    }
   }
 
   for (const panel of buildLegacyCandidates()) {
