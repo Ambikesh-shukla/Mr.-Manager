@@ -171,10 +171,15 @@ export default {
         if (ns === 'post') return handlePostEmbedButton(interaction, parts);
         if (ns === 'server') return handleServerInteraction(interaction, parts);
         if (ns === 'panel') {
+          const looksLikePanelId = (v) => typeof v === 'string' && (
+            /^\d{15,22}$/.test(v) ||
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
+          );
+
           // Current format: panel:open:<panelId>[:typeId]
           if (action === 'open') return handlePanelButton(interaction, id, extra ?? null);
           // Legacy formats: panel:<panelId>[:typeId]
-          if (action) return handlePanelButton(interaction, action, id ?? null);
+          if (looksLikePanelId(action)) return handlePanelButton(interaction, action, id ?? null);
           return interaction.reply({ embeds: [errorEmbed('Panel not found.')], flags: 64 });
         }
         if (ns === 'ticketopentype' || ns === 'ticketopen') return openTicket(interaction, action, id ?? extra ?? null);

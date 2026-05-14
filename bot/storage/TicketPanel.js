@@ -170,7 +170,6 @@ function findByAnyId(index, id) {
   if (index.has(needle)) return index.get(needle);
 
   for (const panel of index.values()) {
-    if (String(panel.id) === needle) return panel;
     if (panel.messageId && String(panel.messageId) === needle) return panel;
     if (panel.panelId && String(panel.panelId) === needle) return panel;
   }
