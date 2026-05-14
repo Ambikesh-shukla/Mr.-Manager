@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 
 const COLLECTION = 'panels';
 const LEGACY_COLLECTION = 'panel';
+let panelIndexCache = null;
 
 const asArray = (v) => {
   if (Array.isArray(v)) return v;
@@ -137,6 +138,8 @@ function buildLegacyCandidates() {
 }
 
 function buildPanelIndex() {
+  if (panelIndexCache) return new Map(panelIndexCache);
+
   const map = new Map();
   const current = getAll(COLLECTION) ?? {};
 
@@ -156,7 +159,8 @@ function buildPanelIndex() {
     }
   }
 
-  return map;
+  panelIndexCache = map;
+  return new Map(map);
 }
 
 function findByAnyId(index, id) {
@@ -178,7 +182,9 @@ export const TicketPanel = {
   create: (guildId, data) => {
     const id = randomUUID();
     const panel = normalizePanel({ id, guildId, ...data }, { fallbackId: id, fallbackGuildId: guildId });
+    if (!panel) return null;
     set(COLLECTION, id, panel);
+    panelIndexCache = null;
     return panel;
   },
 
@@ -190,8 +196,11 @@ export const TicketPanel = {
   update: (id, patch) => {
     const panel = TicketPanel.get(id);
     if (!panel) return null;
-    const updated = normalizePanel({ ...panel, ...patch }, { fallbackId: panel.id, fallbackGuildId: panel.guildId });
-    set(COLLECTION, updated.id, updated);
+    const merged = { ...panel, ...patch };
+    const normalized = normalizePanel(merged, { fallbackId: panel.id, fallbackGuildId: panel.guildId });
+    const updated = normalized ? { ...merged, ...normalized } : merged;
+    set(COLLECTION, updated.id ?? panel.id, updated);
+    panelIndexCache = null;
     return updated;
   },
 
@@ -200,6 +209,7 @@ export const TicketPanel = {
     if (panel) del(COLLECTION, panel.id);
     del(COLLECTION, String(id));
     del(LEGACY_COLLECTION, String(id));
+    panelIndexCache = null;
   },
 
   forGuild: (guildId) => {
