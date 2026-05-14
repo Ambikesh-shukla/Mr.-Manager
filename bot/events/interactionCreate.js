@@ -170,8 +170,14 @@ export default {
         if (ns === 'link') return handleLinkInteraction(interaction, parts);
         if (ns === 'post') return handlePostEmbedButton(interaction, parts);
         if (ns === 'server') return handleServerInteraction(interaction, parts);
-        if (ns === 'panel') return handlePanelButton(interaction, id, extra ?? null);
-        if (ns === 'ticketopentype') return openTicket(interaction, action, id);
+        if (ns === 'panel') {
+          // Current format: panel:open:<panelId>[:typeId]
+          if (action === 'open') return handlePanelButton(interaction, id, extra ?? null);
+          // Legacy formats: panel:<panelId>[:typeId]
+          if (action) return handlePanelButton(interaction, action, id ?? null);
+          return interaction.reply({ embeds: [errorEmbed('Panel not found.')], flags: 64 });
+        }
+        if (ns === 'ticketopentype' || ns === 'ticketopen') return openTicket(interaction, action, id ?? extra ?? null);
 
         if (ns === 'ticket') {
           if (action === 'close') return handleCloseTicket(interaction, id);
@@ -307,7 +313,11 @@ export default {
         }
         if (ns === 'welcome') return handleWelcomeInteraction(interaction, parts);
         if (ns === 'server') return handleServerInteraction(interaction, parts);
-        if (ns === 'panelselect') return handlePanelSelect(interaction, action);
+        if (ns === 'panelselect' || ns === 'panelselect') {
+          const panelId = action === 'open' ? parts[2] : action;
+          return handlePanelSelect(interaction, panelId);
+        }
+        if (ns === 'panel' && action === 'select') return handlePanelSelect(interaction, parts[2]);
         if (ns === 'ticketpriority_set') return handlePrioritySet(interaction, action);
         if (ns === 'noop') return interaction.deferUpdate();
         return;
