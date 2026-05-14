@@ -313,7 +313,7 @@ export default {
         }
         if (ns === 'welcome') return handleWelcomeInteraction(interaction, parts);
         if (ns === 'server') return handleServerInteraction(interaction, parts);
-        if (ns === 'panelselect' || ns === 'panelselect') {
+        if (ns === 'panelselect') {
           const panelId = action === 'open' ? parts[2] : action;
           return handlePanelSelect(interaction, panelId);
         }
