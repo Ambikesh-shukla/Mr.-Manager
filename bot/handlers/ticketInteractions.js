@@ -691,19 +691,29 @@ export async function handlePlanBuy(interaction, planId) {
   const panels = TicketPanel.forGuild(interaction.guild.id);
   if (panels.length === 0) {
     return interaction.reply({
-      embeds: [errorEmbed('No ticket panel is set up yet. Ask an admin to run `/panel create`.')],
+      embeds: [errorEmbed('No ticket panel is set up yet. Ask an admin to run `/setup-ticket`.')],
       flags: 64,
     });
   }
 
-  // Prefer a panel that has a ticket type labelled "purchase" (case-insensitive)
+  const buyTypeNeedle = String(plan.buyTicketType ?? 'purchase').trim().toLowerCase();
+
+  // Prefer a panel type matching plan.buyTicketType, with purchase/sales aliases for legacy data
   let targetPanel = null;
   let targetType = null;
   for (const panel of panels) {
-    const purchaseType = panel.ticketTypes?.find(t => /\bpurchase\b/i.test(t.label));
-    if (purchaseType) {
+    const matchedType = panel.ticketTypes?.find(t => {
+      const label = String(t?.label ?? '').toLowerCase();
+      const id = String(t?.id ?? '').toLowerCase();
+      if (!label && !id) return false;
+      if (buyTypeNeedle && (id === buyTypeNeedle || label === buyTypeNeedle || label.includes(buyTypeNeedle))) return true;
+      if (buyTypeNeedle === 'purchase' && /\b(purchase|buy|order|sale|sales)\b/i.test(label)) return true;
+      return false;
+    }) ?? null;
+
+    if (matchedType) {
       targetPanel = panel;
-      targetType = purchaseType;
+      targetType = matchedType;
       break;
     }
   }

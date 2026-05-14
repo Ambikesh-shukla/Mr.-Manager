@@ -170,8 +170,19 @@ export default {
         if (ns === 'link') return handleLinkInteraction(interaction, parts);
         if (ns === 'post') return handlePostEmbedButton(interaction, parts);
         if (ns === 'server') return handleServerInteraction(interaction, parts);
-        if (ns === 'panel') return handlePanelButton(interaction, id, extra ?? null);
-        if (ns === 'ticketopentype') return openTicket(interaction, action, id);
+        if (ns === 'panel') {
+          const looksLikePanelId = (v) => typeof v === 'string' && (
+            /^\d{15,22}$/.test(v) ||
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
+          );
+
+          // Current format: panel:open:<panelId>[:typeId]
+          if (action === 'open') return handlePanelButton(interaction, id, extra ?? null);
+          // Legacy formats: panel:<panelId>[:typeId]
+          if (looksLikePanelId(action)) return handlePanelButton(interaction, action, id ?? null);
+          return interaction.reply({ embeds: [errorEmbed('Panel not found.')], flags: 64 });
+        }
+        if (ns === 'ticketopentype' || ns === 'ticketopen') return openTicket(interaction, action, id ?? extra ?? null);
 
         if (ns === 'ticket') {
           if (action === 'close') return handleCloseTicket(interaction, id);
@@ -307,7 +318,11 @@ export default {
         }
         if (ns === 'welcome') return handleWelcomeInteraction(interaction, parts);
         if (ns === 'server') return handleServerInteraction(interaction, parts);
-        if (ns === 'panelselect') return handlePanelSelect(interaction, action);
+        if (ns === 'panelselect') {
+          const panelId = action === 'open' ? parts[2] : action;
+          return handlePanelSelect(interaction, panelId);
+        }
+        if (ns === 'panel' && action === 'select') return handlePanelSelect(interaction, parts[2]);
         if (ns === 'ticketpriority_set') return handlePrioritySet(interaction, action);
         if (ns === 'noop') return interaction.deferUpdate();
         return;
