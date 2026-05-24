@@ -9,6 +9,7 @@ import { embed, Colors } from './embeds.js';
 const HELP_DIVIDER = '━━━━━━━━━━━━━━━━';
 export const HELP_MENU_CUSTOM_ID = 'help:menu';
 const HELP_REPO_URL = 'https://github.com/Ambikesh-shukla/Mr.-Manager';
+const DEFAULT_SUPPORT_URL = `${HELP_REPO_URL}/issues`;
 
 const HELP_SECTIONS = {
   overview: {
@@ -123,6 +124,12 @@ function getInviteUrl(interaction) {
   return `https://discord.com/oauth2/authorize?client_id=${appId}&permissions=8&scope=bot%20applications.commands`;
 }
 
+function getSupportUrl() {
+  const configured = (process.env.SUPPORT_URL ?? '').trim();
+  if (configured.startsWith('https://')) return configured;
+  return DEFAULT_SUPPORT_URL;
+}
+
 export function buildHelpCenterEmbed(interaction, sectionKey = 'overview') {
   const section = HELP_SECTIONS[sectionKey] ?? HELP_SECTIONS.overview;
   const thumbnail = interaction.client.user?.displayAvatarURL({ size: 256 }) ?? undefined;
@@ -166,7 +173,7 @@ export function buildHelpCenterComponents(interaction, sectionKey = 'overview') 
       .setLabel('Support')
       .setEmoji('🛟')
       .setStyle(ButtonStyle.Link)
-      .setURL(`${HELP_REPO_URL}/issues`),
+      .setURL(getSupportUrl()),
     new ButtonBuilder()
       .setLabel('Source')
       .setEmoji('🌐')
