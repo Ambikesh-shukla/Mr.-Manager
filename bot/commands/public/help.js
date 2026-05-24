@@ -1,5 +1,6 @@
 import { ComponentType, MessageFlags, SlashCommandBuilder } from 'discord.js';
 import { buildHelpCenterPayload, HELP_MENU_IDLE_MS } from '../../utils/helpCenter.js';
+import { logger } from '../../utils/logger.js';
 
 export default {
   data: new SlashCommandBuilder()
@@ -29,7 +30,9 @@ export default {
     collector.on('end', async () => {
       try {
         await interaction.editReply(buildHelpCenterPayload(interaction, activeSection, { menuDisabled: true }));
-      } catch {}
+      } catch (err) {
+        logger.error('[HELP] Failed to disable help menu after inactivity timeout.', err);
+      }
     });
   },
 };
