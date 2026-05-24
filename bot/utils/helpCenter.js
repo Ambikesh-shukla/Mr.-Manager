@@ -41,7 +41,7 @@ const HELP_SECTIONS = {
       '`/ticket edit` → Open the ticket panel editor for updates',
       '`/ticket delete` → Remove a ticket panel by panel ID',
       '`/plan list` → Show all currently available plans',
-      '`/server` → Open the provisioning dashboard to create and manage server instances',
+      '`/server` → Open the hosting dashboard to create and manage Minecraft server instances',
     ].join('\n'),
   },
   tickets: {
@@ -147,7 +147,6 @@ export function buildHelpCenterEmbed(interaction, sectionKey = 'quickStart') {
     ].join('\n'),
     color: Colors.primary,
     thumbnail,
-    fields: [],
     footer: 'Powered by Mr. Manager ⚡',
     timestamp: true,
   });
