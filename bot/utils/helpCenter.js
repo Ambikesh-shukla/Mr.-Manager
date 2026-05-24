@@ -5,14 +5,14 @@ import {
   StringSelectMenuBuilder,
 } from 'discord.js';
 import { embed, Colors } from './embeds.js';
-import { logger } from './logger.js';
 
 const HELP_DIVIDER = '━━━━━━━━━━━━━━━━';
 export const HELP_MENU_CUSTOM_ID = 'help:menu';
-const HELP_REPO_URL = 'https://github.com/Ambikesh-shukla/Mr.-Manager';
-const DEFAULT_SUPPORT_URL = `${HELP_REPO_URL}/issues`;
-let inviteUrlFallbackWarned = false;
-let supportUrlFallbackWarned = false;
+export const HELP_MENU_IDLE_MS = 120_000;
+const SUPPORT_SERVER_URL = 'https://discord.gg/FT83j6mrg';
+const ADD_BOT_URL = 'https://discord.com/oauth2/authorize?client_id=1495354060507709621&permissions=8&scope=bot%20applications.commands';
+const LEAVE_REVIEW_URL = 'https://top.gg/bot/1495354060507709621#reviews';
+const REVIEW_CTA_TEXT = "If you're enjoying Mr. Manager, please consider leaving a review on Top.gg!";
 
 const HELP_SECTIONS = {
   admin: {
@@ -102,36 +102,8 @@ const HELP_SECTIONS = {
 };
 export const HELP_SECTION_KEYS = Object.keys(HELP_SECTIONS);
 
-function isValidHttpsUrl(url) {
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
-function getInviteUrl(interaction) {
-  const appId = interaction.client.application?.id ?? process.env.DISCORD_APPLICATION_ID;
-  if (!appId) {
-    if (!inviteUrlFallbackWarned) {
-      logger.warn('[HELP] Missing Discord application ID; invite button is falling back to repository URL.');
-      inviteUrlFallbackWarned = true;
-    }
-    return HELP_REPO_URL;
-  }
-  return `https://discord.com/oauth2/authorize?client_id=${appId}&permissions=0&scope=bot%20applications.commands`;
-}
-
-function getSupportUrl() {
-  const configured = (process.env.SUPPORT_URL ?? '').trim();
-  if (!configured) return DEFAULT_SUPPORT_URL;
-  if (isValidHttpsUrl(configured)) return configured;
-  if (!supportUrlFallbackWarned) {
-    logger.warn('[HELP] SUPPORT_URL is invalid; support button is falling back to default support URL.');
-    supportUrlFallbackWarned = true;
-  }
-  return DEFAULT_SUPPORT_URL;
+export function getHelpMenuCustomId(userId) {
+  return userId ? `${HELP_MENU_CUSTOM_ID}:${userId}` : HELP_MENU_CUSTOM_ID;
 }
 
 export function buildHelpCenterEmbed(interaction, sectionKey = 'quickStart') {
@@ -144,6 +116,8 @@ export function buildHelpCenterEmbed(interaction, sectionKey = 'quickStart') {
       `**${section.sectionTitle}**`,
       HELP_DIVIDER,
       section.sectionBody,
+      '',
+      `⭐ ${REVIEW_CTA_TEXT}`,
     ].join('\n'),
     color: Colors.primary,
     thumbnail,
@@ -152,10 +126,11 @@ export function buildHelpCenterEmbed(interaction, sectionKey = 'quickStart') {
   });
 }
 
-export function buildHelpCenterComponents(interaction, sectionKey = 'quickStart') {
+export function buildHelpCenterComponents(interaction, sectionKey = 'quickStart', { menuDisabled = false } = {}) {
   const menu = new StringSelectMenuBuilder()
-    .setCustomId(HELP_MENU_CUSTOM_ID)
+    .setCustomId(getHelpMenuCustomId(interaction.user?.id))
     .setPlaceholder('Navigate Help Center')
+    .setDisabled(menuDisabled)
     .addOptions(Object.entries(HELP_SECTIONS).map(([key, section]) => ({
       label: section.menuLabel,
       description: section.menuDescription,
@@ -168,28 +143,28 @@ export function buildHelpCenterComponents(interaction, sectionKey = 'quickStart'
 
   const linksRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setLabel('Invite Bot')
-      .setEmoji('📥')
+      .setLabel('Support Server')
+      .setEmoji('🆘')
       .setStyle(ButtonStyle.Link)
-      .setURL(getInviteUrl(interaction)),
+      .setURL(SUPPORT_SERVER_URL),
     new ButtonBuilder()
-      .setLabel('Support')
-      .setEmoji('🛟')
+      .setLabel('Add Bot')
+      .setEmoji('➕')
       .setStyle(ButtonStyle.Link)
-      .setURL(getSupportUrl()),
+      .setURL(ADD_BOT_URL),
     new ButtonBuilder()
-      .setLabel('Source')
-      .setEmoji('🌐')
+      .setLabel('Leave Review')
+      .setEmoji('⭐')
       .setStyle(ButtonStyle.Link)
-      .setURL(HELP_REPO_URL),
+      .setURL(LEAVE_REVIEW_URL),
   );
 
   return [menuRow, linksRow];
 }
 
-export function buildHelpCenterPayload(interaction, sectionKey = 'quickStart') {
+export function buildHelpCenterPayload(interaction, sectionKey = 'quickStart', options = {}) {
   return {
     embeds: [buildHelpCenterEmbed(interaction, sectionKey)],
-    components: buildHelpCenterComponents(interaction, sectionKey),
+    components: buildHelpCenterComponents(interaction, sectionKey, options),
   };
 }
