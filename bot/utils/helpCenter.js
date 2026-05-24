@@ -115,6 +115,7 @@ const HELP_SECTIONS = {
     ],
   },
 };
+export const HELP_SECTION_KEYS = Object.keys(HELP_SECTIONS);
 
 function getInviteUrl(interaction) {
   const appId = interaction.client.application?.id ?? process.env.DISCORD_APPLICATION_ID;
@@ -129,9 +130,9 @@ export function buildHelpCenterEmbed(interaction, sectionKey = 'overview') {
   return embed({
     title: '🤖 Mr. Manager Help Center',
     description: [
-      section.sectionBody,
-      HELP_DIVIDER,
       `**${section.sectionTitle}**`,
+      HELP_DIVIDER,
+      section.sectionBody,
     ].join('\n'),
     color: Colors.primary,
     thumbnail,
