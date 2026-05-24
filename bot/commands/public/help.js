@@ -20,6 +20,7 @@ export default {
     const collector = message.createMessageComponentCollector({
       componentType: ComponentType.StringSelect,
       idle: HELP_MENU_IDLE_MS,
+      filter: (selectInteraction) => selectInteraction.user.id === interaction.user.id,
     });
 
     collector.on('collect', (selectInteraction) => {

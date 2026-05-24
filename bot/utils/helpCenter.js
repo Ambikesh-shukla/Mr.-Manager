@@ -8,6 +8,7 @@ import { embed, Colors } from './embeds.js';
 
 const HELP_DIVIDER = '━━━━━━━━━━━━━━━━';
 export const HELP_MENU_CUSTOM_ID = 'help:menu';
+// Disable help dropdown after 2 minutes of inactivity.
 export const HELP_MENU_IDLE_MS = 120_000;
 const SUPPORT_SERVER_URL = 'https://discord.gg/FT83j6mrg';
 const ADD_BOT_URL = 'https://discord.com/oauth2/authorize?client_id=1495354060507709621&permissions=8&scope=bot%20applications.commands';
@@ -104,6 +105,15 @@ export const HELP_SECTION_KEYS = Object.keys(HELP_SECTIONS);
 
 export function getHelpMenuCustomId(userId) {
   return userId ? `${HELP_MENU_CUSTOM_ID}:${userId}` : HELP_MENU_CUSTOM_ID;
+}
+
+export function parseHelpMenuCustomId(customId) {
+  if (!customId || typeof customId !== 'string') return null;
+  const parts = customId.split(':');
+  if (parts[0] !== 'help' || parts[1] !== 'menu') return null;
+  return {
+    ownerId: parts.length > 2 ? parts.slice(2).join(':') : undefined,
+  };
 }
 
 export function buildHelpCenterEmbed(interaction, sectionKey = 'quickStart') {
