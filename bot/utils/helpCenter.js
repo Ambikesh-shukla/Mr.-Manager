@@ -69,7 +69,7 @@ const HELP_SECTIONS = {
       '`/invite` → Check invite stats and reward eligibility',
       '`/afk set` → Set your away status with an optional reason',
       '`/afk remove` → Clear your AFK status',
-      '`/afk status` → Check a member\'s AFK status',
+      '`/afk status` → Check a member’s AFK status',
       '`/review submit` → Submit a review or vouch',
     ].join('\n'),
   },
