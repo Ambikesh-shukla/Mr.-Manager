@@ -5,11 +5,14 @@ import {
   StringSelectMenuBuilder,
 } from 'discord.js';
 import { embed, Colors } from './embeds.js';
+import { logger } from './logger.js';
 
 const HELP_DIVIDER = '━━━━━━━━━━━━━━━━';
 export const HELP_MENU_CUSTOM_ID = 'help:menu';
 const HELP_REPO_URL = 'https://github.com/Ambikesh-shukla/Mr.-Manager';
 const DEFAULT_SUPPORT_URL = `${HELP_REPO_URL}/issues`;
+let inviteUrlFallbackWarned = false;
+let supportUrlFallbackWarned = false;
 
 const HELP_SECTIONS = {
   overview: {
@@ -118,15 +121,35 @@ const HELP_SECTIONS = {
 };
 export const HELP_SECTION_KEYS = Object.keys(HELP_SECTIONS);
 
+function isValidHttpsUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 function getInviteUrl(interaction) {
   const appId = interaction.client.application?.id ?? process.env.DISCORD_APPLICATION_ID;
-  if (!appId) return HELP_REPO_URL;
+  if (!appId) {
+    if (!inviteUrlFallbackWarned) {
+      logger.warn('[HELP] Missing Discord application ID; invite button is falling back to repository URL.');
+      inviteUrlFallbackWarned = true;
+    }
+    return HELP_REPO_URL;
+  }
   return `https://discord.com/oauth2/authorize?client_id=${appId}&permissions=8&scope=bot%20applications.commands`;
 }
 
 function getSupportUrl() {
   const configured = (process.env.SUPPORT_URL ?? '').trim();
-  if (configured.startsWith('https://')) return configured;
+  if (!configured) return DEFAULT_SUPPORT_URL;
+  if (isValidHttpsUrl(configured)) return configured;
+  if (!supportUrlFallbackWarned) {
+    logger.warn('[HELP] SUPPORT_URL is invalid; support button is falling back to default support URL.');
+    supportUrlFallbackWarned = true;
+  }
   return DEFAULT_SUPPORT_URL;
 }
 
