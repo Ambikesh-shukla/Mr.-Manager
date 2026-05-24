@@ -41,7 +41,7 @@ const HELP_SECTIONS = {
       '`/ticket edit` → Open the ticket panel editor for updates',
       '`/ticket delete` → Remove a ticket panel by panel ID',
       '`/plan list` → Show all currently available plans',
-      '`/server` → Open the provisioning dashboard for managed servers',
+      '`/server` → Open the provisioning dashboard to create and manage server instances',
     ].join('\n'),
   },
   tickets: {
@@ -94,7 +94,7 @@ const HELP_SECTIONS = {
       '`/admin staffrole add` → Add your support role first',
       '`/setup-ticket` → Build and publish your ticket panel',
       '`/plan create` → Publish your first hosting/service plan',
-      '`/welcome` → Configure welcome and goodbye cards',
+      '`/post embed` → Publish a polished info or sales embed in your channels',
       '`/command-lock set` → Lock sensitive commands before going live',
       '`/help` → Reopen this board anytime for command reference',
     ].join('\n'),
