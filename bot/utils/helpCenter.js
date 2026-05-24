@@ -139,7 +139,7 @@ function getInviteUrl(interaction) {
     }
     return HELP_REPO_URL;
   }
-  return `https://discord.com/oauth2/authorize?client_id=${appId}&permissions=8&scope=bot%20applications.commands`;
+  return `https://discord.com/oauth2/authorize?client_id=${appId}&permissions=0&scope=bot%20applications.commands`;
 }
 
 function getSupportUrl() {
