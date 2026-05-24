@@ -10,7 +10,7 @@ export default {
 
   async execute(interaction) {
     await interaction.reply({
-      ...buildHelpCenterPayload(interaction, 'overview'),
+      ...buildHelpCenterPayload(interaction, 'quickStart'),
       flags: MessageFlags.Ephemeral,
     });
   },

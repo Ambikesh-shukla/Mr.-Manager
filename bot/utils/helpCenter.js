@@ -15,108 +15,89 @@ let inviteUrlFallbackWarned = false;
 let supportUrlFallbackWarned = false;
 
 const HELP_SECTIONS = {
-  overview: {
-    menuLabel: 'Overview',
-    menuDescription: 'What Mr. Manager does + fast setup',
-    menuEmoji: '🏠',
-    sectionTitle: '🏠 Help Overview',
+  admin: {
+    menuLabel: 'Admin Commands',
+    menuDescription: 'Core configuration and moderation tools',
+    menuEmoji: '🔐',
+    sectionTitle: '🔐 Admin Commands',
     sectionBody: [
-      'Mr. Manager helps you run a polished community support stack with tickets,',
-      'hosting plans, server tools, review workflows, AFK status, and automation.',
+      '`/admin config` → View the full bot configuration snapshot',
+      '`/admin staffrole add` → Grant a role access to staff-level actions',
+      '`/admin staffrole remove` → Remove a role from staff access',
+      '`/welcome` → Configure welcome and goodbye card flows',
+      '`/autoresponse add` → Add an auto-reply trigger for common questions',
+      '`/post embed` → Launch the guided embed posting wizard',
+      '`/purge all` → Bulk-delete recent messages in the current channel',
+      '`/link` → Manage the server link-block protection system',
     ].join('\n'),
-    fields: [
-      {
-        name: '🧩 What the bot does',
-        value: '🎟️ Tickets • 💼 Hosting plans • 🛠️ Server tools • ⭐ Reviews • 😴 AFK • 🤖 Automation',
-        inline: false,
-      },
-      {
-        name: '🧭 How to use this menu',
-        value: 'Use the dropdown below to switch sections and get focused command guidance.',
-        inline: false,
-      },
-      {
-        name: '🚀 Quick setup path',
-        value: '1. `/admin staffrole add`\n2. `/setup-ticket`\n3. `/plan create`\n4. `/plan sales`',
-        inline: false,
-      },
-      {
-        name: '🔗 Important links',
-        value: 'Use the buttons below for invite, support, and source links.',
-        inline: false,
-      },
-    ],
+  },
+  staff: {
+    menuLabel: 'Staff Commands',
+    menuDescription: 'Operational commands for moderators and team roles',
+    menuEmoji: '👨‍💼',
+    sectionTitle: '👨‍💼 Staff Commands',
+    sectionBody: [
+      '`/review list` → Check pending reviews waiting for approval',
+      '`/ticket edit` → Open the ticket panel editor for updates',
+      '`/ticket delete` → Remove a ticket panel by panel ID',
+      '`/plan list` → Show all currently available plans',
+      '`/server` → Open the provisioning dashboard for managed servers',
+    ].join('\n'),
   },
   tickets: {
-    menuLabel: 'Tickets',
-    menuDescription: 'Support board and ticket workflow',
-    menuEmoji: '🎟️',
-    sectionTitle: '🎟️ Ticket Center',
-    sectionBody: 'Build and operate a clean support board with setup wizard + ticket controls.',
-    fields: [
-      {
-        name: '🛠️ Setup & management',
-        value: '`/setup-ticket` • `/ticket list` • `/ticket edit` • `/ticket delete`',
-        inline: false,
-      },
-      {
-        name: '📨 Ticket actions',
-        value: '`/ticket close` • `/ticket claim` • `/ticket add-user` • `/ticket remove-user` • `/ticket transcript`',
-        inline: false,
-      },
-    ],
+    menuLabel: 'Ticket Commands',
+    menuDescription: 'Ticket setup and panel management',
+    menuEmoji: '🎫',
+    sectionTitle: '🎫 Ticket Commands',
+    sectionBody: [
+      '`/setup-ticket` → Create ticket panels with the guided setup flow',
+      '`/ticket edit` → Modify an existing ticket panel by panel ID',
+      '`/ticket delete` → Delete a ticket panel and remove its message',
+    ].join('\n'),
   },
-  hosting: {
-    menuLabel: 'Hosting',
-    menuDescription: 'Plans, credits, and invite rewards',
-    menuEmoji: '💼',
-    sectionTitle: '💼 Hosting & Billing',
-    sectionBody: 'Manage plans, sell services, and track credits from one flow.',
-    fields: [
-      {
-        name: '📦 Plan tools',
-        value: '`/plan create` • `/plan list` • `/plan sales` • `/plan config`',
-        inline: false,
-      },
-      {
-        name: '💳 Credits & rewards',
-        value: '`/credits` • `/redeem` • `/invite`',
-        inline: false,
-      },
-    ],
+  public: {
+    menuLabel: 'Public Commands',
+    menuDescription: 'Everyday commands available to members',
+    menuEmoji: '🌍',
+    sectionTitle: '🌍 Public Commands',
+    sectionBody: [
+      '`/help` → Open this interactive help board',
+      '`/ping` → Check bot and API latency status',
+      '`/serverinfo` → Show server owner, members, and stats',
+      '`/credits` → View server credits, plan, and usage',
+      '`/redeem` → Redeem a Core/Pro server code',
+      '`/invite` → Check invite stats and reward eligibility',
+      '`/afk set` → Set your away status with an optional reason',
+      '`/afk remove` → Clear your AFK status',
+      '`/afk status` → Check a member AFK status',
+      '`/review submit` → Submit a review or vouch',
+    ].join('\n'),
   },
-  tools: {
-    menuLabel: 'Server Tools',
-    menuDescription: 'Moderation and utility command set',
-    menuEmoji: '🛠️',
-    sectionTitle: '🛠️ Server Tools',
-    sectionBody: 'Daily operational tools for staff and admins.',
-    fields: [
-      {
-        name: '👮 Admin controls',
-        value: '`/admin config` • `/command-lock set/view/list/reset` • `/purge`',
-        inline: false,
-      },
-      {
-        name: '🌐 Utility',
-        value: '`/serverinfo` • `/server panel` • `/link`',
-        inline: false,
-      },
-    ],
+  commandLock: {
+    menuLabel: 'Command Lock System',
+    menuDescription: 'Control command access by role and level',
+    menuEmoji: '🔒',
+    sectionTitle: '🔒 Command Lock System',
+    sectionBody: [
+      '`/command-lock set` → Set a command mode (public/staff/admin/role)',
+      '`/command-lock view` → Inspect the current lock for one command',
+      '`/command-lock list` → List lock settings for all commands',
+      '`/command-lock reset` → Restore one command to its default mode',
+    ].join('\n'),
   },
-  automation: {
-    menuLabel: 'Automation',
-    menuDescription: 'Auto responses, welcome, and reviews',
-    menuEmoji: '🤖',
-    sectionTitle: '🤖 Automation Suite',
-    sectionBody: 'Automate repetitive server workflows and engagement routines.',
-    fields: [
-      {
-        name: '⚙️ Automation commands',
-        value: '`/autoresponse add/remove/list` • `/welcome` • `/review config/list/submit` • `/afk set/remove/status`',
-        inline: false,
-      },
-    ],
+  quickStart: {
+    menuLabel: 'Quick Start',
+    menuDescription: 'Fast launch path for a new server setup',
+    menuEmoji: '⚡',
+    sectionTitle: '⚡ Quick Start',
+    sectionBody: [
+      '`/admin staffrole add` → Add your support role first',
+      '`/setup-ticket` → Build and publish your ticket panel',
+      '`/plan create` → Publish your first hosting/service plan',
+      '`/welcome` → Configure welcome and goodbye cards',
+      '`/command-lock set` → Lock sensitive commands before going live',
+      '`/help` → Reopen this board anytime for command reference',
+    ].join('\n'),
   },
 };
 export const HELP_SECTION_KEYS = Object.keys(HELP_SECTIONS);
@@ -153,8 +134,8 @@ function getSupportUrl() {
   return DEFAULT_SUPPORT_URL;
 }
 
-export function buildHelpCenterEmbed(interaction, sectionKey = 'overview') {
-  const section = HELP_SECTIONS[sectionKey] ?? HELP_SECTIONS.overview;
+export function buildHelpCenterEmbed(interaction, sectionKey = 'quickStart') {
+  const section = HELP_SECTIONS[sectionKey] ?? HELP_SECTIONS.quickStart;
   const thumbnail = interaction.client.user?.displayAvatarURL({ size: 256 }) ?? undefined;
 
   return embed({
@@ -166,13 +147,13 @@ export function buildHelpCenterEmbed(interaction, sectionKey = 'overview') {
     ].join('\n'),
     color: Colors.primary,
     thumbnail,
-    fields: section.fields,
+    fields: [],
     footer: 'Powered by Mr. Manager ⚡',
     timestamp: true,
   });
 }
 
-export function buildHelpCenterComponents(interaction, sectionKey = 'overview') {
+export function buildHelpCenterComponents(interaction, sectionKey = 'quickStart') {
   const menu = new StringSelectMenuBuilder()
     .setCustomId(HELP_MENU_CUSTOM_ID)
     .setPlaceholder('Navigate Help Center')
@@ -207,7 +188,7 @@ export function buildHelpCenterComponents(interaction, sectionKey = 'overview') 
   return [menuRow, linksRow];
 }
 
-export function buildHelpCenterPayload(interaction, sectionKey = 'overview') {
+export function buildHelpCenterPayload(interaction, sectionKey = 'quickStart') {
   return {
     embeds: [buildHelpCenterEmbed(interaction, sectionKey)],
     components: buildHelpCenterComponents(interaction, sectionKey),
