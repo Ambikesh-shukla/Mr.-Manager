@@ -31,6 +31,7 @@ import { handleWelcomeInteraction } from '../handlers/welcomeHandler.js';
 import { handleLinkInteraction } from '../handlers/linkHandler.js';
 import { handleServerInteraction } from '../handlers/serverHandler.js';
 import { handlePostEmbedButton } from '../handlers/postHandler.js';
+import { handleHelpInteraction } from '../handlers/helpHandler.js';
 
 const INSUFFICIENT_CREDITS_MSG = '❌ This server does not have enough credits. Use `/credits` or `/redeem`.';
 const EARLY_DEFER_COMMANDS = new Set(['ping', 'credits', 'purge']);
@@ -318,6 +319,7 @@ export default {
         }
         if (ns === 'welcome') return handleWelcomeInteraction(interaction, parts);
         if (ns === 'server') return handleServerInteraction(interaction, parts);
+        if (ns === 'help') return handleHelpInteraction(interaction);
         if (ns === 'panelselect') {
           const panelId = action === 'open' ? parts[2] : action;
           return handlePanelSelect(interaction, panelId);
