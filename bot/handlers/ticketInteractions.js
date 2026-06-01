@@ -46,7 +46,10 @@ function buildReopenRow(ticket) {
 
 // ─── safe reply helper (works before or after defer) ─────────────────────────
 async function safeReply(interaction, payload) {
-  if (interaction.deferred) return interaction.editReply(payload);
+  if (interaction.deferred) {
+    if (interaction.ephemeral) return interaction.editReply(payload);
+    return interaction.followUp(payload);
+  }
   if (interaction.replied) return interaction.followUp(payload);
   return interaction.reply(payload);
 }
@@ -58,6 +61,18 @@ export async function openTicket(interaction, panelId, ticketTypeId) {
 
   const guild = interaction.guild;
   const member = interaction.member;
+  const ticketType = panel.ticketTypes?.find(t => t.id === ticketTypeId) ?? null;
+  const requiresModal = Boolean(
+    panel.modalEnabled &&
+    ticketType?.questions?.length > 0 &&
+    !interaction.deferred &&
+    !interaction.replied,
+  );
+
+  // Immediately acknowledge interaction for non-modal flows.
+  if (!requiresModal && !interaction.deferred && !interaction.replied) {
+    await interaction.deferReply({ flags: 64 });
+  }
 
   // Blacklist check
   if (panel.blacklistEnabled && panel.blacklistedUsers?.includes(member.id)) {
@@ -87,11 +102,8 @@ export async function openTicket(interaction, panelId, ticketTypeId) {
     }
   }
 
-  // Resolve ticket type
-  const ticketType = panel.ticketTypes?.find(t => t.id === ticketTypeId) ?? null;
-
   // CRITICAL: showModal must be the FIRST response — check before any defer/reply
-  if (panel.modalEnabled && ticketType?.questions?.length > 0 && !interaction.deferred && !interaction.replied) {
+  if (requiresModal) {
     const modal = new ModalBuilder()
       .setCustomId(`ticketmodal:${panelId}:${ticketTypeId ?? 'default'}`)
       .setTitle(ticketType.label ?? 'Open a Ticket');
@@ -145,13 +157,6 @@ async function createTicketChannel(interaction, panel, ticketType, modalAnswers)
   const member = interaction.member;
 
   try {
-    const hasRequiredPermissions = await assertBotPermissions(
-      interaction,
-      FEATURE_BOT_PERMISSIONS.ticket,
-      { featureName: 'ticket creation' },
-    );
-    if (!hasRequiredPermissions) return;
-
     const ticketNumber = Ticket.nextNumber(guild.id);
     const name = (panel.namingFormat ?? 'ticket-{username}')
       .replace('{username}', member.user.username.toLowerCase().replace(/[^a-z0-9]/g, ''))
@@ -160,6 +165,31 @@ async function createTicketChannel(interaction, panel, ticketType, modalAnswers)
       .slice(0, 100);
 
     const supportCategory = ticketType?.category ?? panel.supportCategory ?? null;
+    const me = guild.members.me;
+    if (!me?.permissions?.has(PermissionFlagsBits.ManageChannels)) {
+      return safeReply(interaction, {
+        embeds: [errorEmbed('I need **Manage Channels** permission to create tickets. Please ask an admin to grant it and try again.')],
+        flags: 64,
+      });
+    }
+
+    if (supportCategory) {
+      const category = await guild.channels.fetch(supportCategory).catch(() => null);
+      const perms = category?.permissionsFor?.(me);
+      if (perms && !perms.has(PermissionFlagsBits.ManageChannels)) {
+        return safeReply(interaction, {
+          embeds: [errorEmbed('I cannot create tickets in the configured ticket category because I am missing **Manage Channels** there.')],
+          flags: 64,
+        });
+      }
+    }
+
+    const hasRequiredPermissions = await assertBotPermissions(
+      interaction,
+      FEATURE_BOT_PERMISSIONS.ticket,
+      { featureName: 'ticket creation' },
+    );
+    if (!hasRequiredPermissions) return;
 
     // Build permission overwrites
     const overwrites = [
@@ -254,10 +284,10 @@ async function createTicketChannel(interaction, panel, ticketType, modalAnswers)
       scheduleInactivityClose(channel, ticket, panel);
     }
 
-    await interaction.editReply({ embeds: [successEmbed('Ticket Created', `Your ticket has been created: <#${channel.id}>`)] });
+    await safeReply(interaction, { embeds: [successEmbed('Ticket Created', `Your ticket has been created: <#${channel.id}>`)], flags: 64 });
   } catch (err) {
     logger.error('Failed to create ticket channel', err);
-    await interaction.editReply({ embeds: [errorEmbed('Failed to create ticket. Please contact an admin.')] });
+    await safeReply(interaction, { embeds: [errorEmbed('Failed to create ticket. Please contact an admin.')], flags: 64 });
   }
 }
 
