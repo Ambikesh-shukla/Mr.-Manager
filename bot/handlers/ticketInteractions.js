@@ -46,10 +46,7 @@ function buildReopenRow(ticket) {
 
 // ─── safe reply helper (works before or after defer) ─────────────────────────
 async function safeReply(interaction, payload) {
-  if (interaction.deferred) {
-    if (interaction.ephemeral) return interaction.editReply(payload);
-    return interaction.followUp(payload);
-  }
+  if (interaction.deferred) return interaction.editReply(payload);
   if (interaction.replied) return interaction.followUp(payload);
   return interaction.reply(payload);
 }
@@ -166,12 +163,12 @@ async function createTicketChannel(interaction, panel, ticketType, modalAnswers)
 
     const supportCategory = ticketType?.category ?? panel.supportCategory ?? null;
     const me = guild.members.me;
-    if (!me?.permissions?.has(PermissionFlagsBits.ManageChannels)) {
-      return safeReply(interaction, {
-        embeds: [errorEmbed('I need **Manage Channels** permission to create tickets. Please ask an admin to grant it and try again.')],
-        flags: 64,
-      });
-    }
+    const hasManageChannels = await assertBotPermissions(
+      interaction,
+      [PermissionFlagsBits.ManageChannels],
+      { channel: guild, featureName: 'ticket creation' },
+    );
+    if (!hasManageChannels) return;
 
     if (supportCategory) {
       const category = await guild.channels.fetch(supportCategory).catch(() => null);
