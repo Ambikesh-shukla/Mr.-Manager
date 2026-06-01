@@ -1,6 +1,7 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import { Colors, errorEmbed, successEmbed } from '../utils/embeds.js';
 import { PostEmbedSession } from '../storage/PostEmbedSession.js';
+import { assertBotPermissions, FEATURE_BOT_PERMISSIONS } from '../utils/permissions.js';
 
 const STEPS = [
   { key: 'title', label: 'Title', max: 256 },
@@ -304,6 +305,15 @@ export async function handlePostEmbedButton(interaction, parts) {
     if (!target || target.type !== ChannelType.GuildText) {
       return interaction.reply({ embeds: [errorEmbed('Target channel is invalid or no longer exists.')], flags: 64 });
     }
+    const requiredPermissions = (session.image || session.thumbnail)
+      ? FEATURE_BOT_PERMISSIONS.postWithImages
+      : FEATURE_BOT_PERMISSIONS.postBase;
+    const hasRequiredPermissions = await assertBotPermissions(
+      interaction,
+      requiredPermissions,
+      { channel: target, featureName: 'embed posting in the target channel' },
+    );
+    if (!hasRequiredPermissions) return;
     try {
       await target.send({ embeds: [buildFinalEmbed(session)] });
       await clearOriginalWizardMessage(session);

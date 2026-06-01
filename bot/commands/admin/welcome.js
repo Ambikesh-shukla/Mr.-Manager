@@ -1,5 +1,9 @@
 import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
-import { isAdmin } from '../../utils/permissions.js';
+import {
+  isAdmin,
+  assertBotPermissions,
+  FEATURE_BOT_PERMISSIONS,
+} from '../../utils/permissions.js';
 import { errorEmbed } from '../../utils/embeds.js';
 import { showWelcomeDashboard } from '../../handlers/welcomeHandler.js';
 
@@ -15,6 +19,12 @@ export default {
     if (!isAdmin(interaction.member)) {
       return interaction.reply({ embeds: [errorEmbed('You need **Administrator** or **Manage Server** permission.')], flags: 64 });
     }
+    const hasRequiredPermissions = await assertBotPermissions(
+      interaction,
+      FEATURE_BOT_PERMISSIONS.welcomeGoodbye,
+      { featureName: '`/welcome`' },
+    );
+    if (!hasRequiredPermissions) return;
     try {
       return await showWelcomeDashboard(interaction);
     } catch (error) {

@@ -3,6 +3,7 @@ import { GuildConfig } from '../../storage/GuildConfig.js';
 import { Review } from '../../storage/Review.js';
 import { embed, successEmbed, Colors, reviewEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
+import { assertBotPermissions, FEATURE_BOT_PERMISSIONS } from '../../utils/permissions.js';
 
 export default {
   data: new SlashCommandBuilder()
@@ -38,6 +39,12 @@ export default {
       if (config.vouchApprovalChannel) {
         try {
           const approvalCh = await interaction.guild.channels.fetch(config.vouchApprovalChannel);
+          const hasRequiredPermissions = await assertBotPermissions(
+            interaction,
+            FEATURE_BOT_PERMISSIONS.postBase,
+            { channel: approvalCh, featureName: 'review approval posting' },
+          );
+          if (!hasRequiredPermissions) return;
           const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`review:approve:${review.id}`).setLabel('✅ Approve').setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId(`review:deny:${review.id}`).setLabel('❌ Deny').setStyle(ButtonStyle.Danger),
@@ -63,6 +70,12 @@ export default {
 
       // No approval channel configured — post review directly in the current channel
       try {
+        const hasRequiredPermissions = await assertBotPermissions(
+          interaction,
+          FEATURE_BOT_PERMISSIONS.postBase,
+          { featureName: 'review posting in this channel' },
+        );
+        if (!hasRequiredPermissions) return;
         const giveReviewRow = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('review:give').setLabel('Give Review').setStyle(ButtonStyle.Primary),
         );

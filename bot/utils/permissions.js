@@ -29,6 +29,39 @@ export const COMMAND_DEFAULTS = {
   purge: 'admin',
 };
 
+export const FEATURE_BOT_PERMISSIONS = {
+  ticket: [
+    PermissionFlagsBits.ManageChannels,
+    PermissionFlagsBits.ViewChannel,
+    PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.EmbedLinks,
+    PermissionFlagsBits.AttachFiles,
+    PermissionFlagsBits.ReadMessageHistory,
+  ],
+  welcomeGoodbye: [
+    PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.EmbedLinks,
+    PermissionFlagsBits.AttachFiles,
+  ],
+  linkBlock: [
+    PermissionFlagsBits.ManageMessages,
+    PermissionFlagsBits.ReadMessageHistory,
+  ],
+  purge: [
+    PermissionFlagsBits.ManageMessages,
+    PermissionFlagsBits.ReadMessageHistory,
+  ],
+  postBase: [
+    PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.EmbedLinks,
+  ],
+  postWithImages: [
+    PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.EmbedLinks,
+    PermissionFlagsBits.AttachFiles,
+  ],
+};
+
 // ─── Raw checkers ──────────────────────────────────────────────────────────
 
 export function isAdmin(member) {
@@ -145,4 +178,60 @@ export function requireStaff(interaction, panel = null) {
     return false;
   }
   return true;
+}
+
+const PERMISSION_LABELS = {
+  [PermissionFlagsBits.ManageChannels]: 'Manage Channels',
+  [PermissionFlagsBits.ViewChannel]: 'View Channels',
+  [PermissionFlagsBits.SendMessages]: 'Send Messages',
+  [PermissionFlagsBits.EmbedLinks]: 'Embed Links',
+  [PermissionFlagsBits.AttachFiles]: 'Attach Files',
+  [PermissionFlagsBits.ReadMessageHistory]: 'Read Message History',
+  [PermissionFlagsBits.ManageMessages]: 'Manage Messages',
+  [PermissionFlagsBits.ManageRoles]: 'Manage Roles',
+};
+
+function formatPermission(permissionFlag) {
+  return PERMISSION_LABELS[permissionFlag] ?? String(permissionFlag);
+}
+
+export function getMissingBotPermissions(target, requiredPermissions = []) {
+  if (!target) return [];
+
+  const guild = target.guild ?? target;
+  const me = guild?.members?.me;
+  if (!me) return [...requiredPermissions];
+
+  if (typeof target.permissionsFor === 'function') {
+    const perms = target.permissionsFor(me);
+    if (!perms) return [...requiredPermissions];
+    return requiredPermissions.filter((permission) => !perms.has(permission));
+  }
+
+  const guildPerms = me.permissions;
+  if (!guildPerms) return [...requiredPermissions];
+  return requiredPermissions.filter((permission) => !guildPerms.has(permission));
+}
+
+export async function assertBotPermissions(interaction, requiredPermissions, options = {}) {
+  const target = options.channel ?? interaction?.channel ?? interaction?.guild;
+  const featureName = options.featureName ?? 'this feature';
+  const missing = getMissingBotPermissions(target, requiredPermissions);
+
+  if (missing.length === 0) return true;
+
+  const missingText = missing.map((permission) => `**${formatPermission(permission)}**`).join(', ');
+  const msg = missing.length === 1
+    ? `I am missing ${missingText} permission required for ${featureName}.`
+    : `I am missing these permissions required for ${featureName}: ${missingText}.`;
+
+  try {
+    const payload = { embeds: [errorEmbed(msg)], flags: 64 };
+    if (interaction.replied || interaction.deferred) await interaction.followUp(payload);
+    else await interaction.reply(payload);
+  } catch (err) {
+    logger.error('Failed to send bot permission error reply', err);
+  }
+
+  return false;
 }

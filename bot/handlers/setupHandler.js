@@ -7,7 +7,11 @@ import {
 import { SetupSession } from '../storage/SetupSession.js';
 import { TicketPanel } from '../storage/TicketPanel.js';
 import { embed, Colors, errorEmbed, successEmbed } from '../utils/embeds.js';
-import { isAdmin } from '../utils/permissions.js';
+import {
+  isAdmin,
+  assertBotPermissions,
+  FEATURE_BOT_PERMISSIONS,
+} from '../utils/permissions.js';
 import { randomUUID } from 'crypto';
 import { logger } from '../utils/logger.js';
 
@@ -681,6 +685,13 @@ async function finalizePanel(interaction, session, channelId) {
     } else {
       panel = TicketPanel.create(guild.id, panelData);
     }
+
+    const hasRequiredPermissions = await assertBotPermissions(
+      interaction,
+      FEATURE_BOT_PERMISSIONS.ticket,
+      { channel, featureName: 'ticket panel setup in that channel' },
+    );
+    if (!hasRequiredPermissions) return;
 
     const panelEmbeds = buildPreviewEmbeds(session);
     const panelComponents = buildPostedPanelComponents(panel);

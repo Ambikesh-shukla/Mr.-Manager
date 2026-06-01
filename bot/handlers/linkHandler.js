@@ -1,6 +1,6 @@
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  UserSelectMenuBuilder, EmbedBuilder,
+  UserSelectMenuBuilder, EmbedBuilder, PermissionFlagsBits,
 } from 'discord.js';
 import { LinkConfig } from '../storage/LinkConfig.js';
 import { embed, Colors, errorEmbed } from '../utils/embeds.js';
@@ -248,8 +248,10 @@ async function showManageUsers(interaction) {
 // ── Main interaction handler ──────────────────────────────────────────────────
 
 export async function handleLinkInteraction(interaction, parts) {
-  if (!isAdmin(interaction.member)) {
-    return interaction.reply({ embeds: [errorEmbed('You need **Administrator** permission.')], flags: 64 });
+  const canManageLink = isAdmin(interaction.member)
+    || interaction.member?.permissions?.has(PermissionFlagsBits.ManageMessages);
+  if (!canManageLink) {
+    return interaction.reply({ embeds: [errorEmbed('You need **Manage Messages** permission to manage link blocking.')], flags: 64 });
   }
 
   const guildId = interaction.guildId;

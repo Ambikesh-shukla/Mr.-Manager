@@ -1,5 +1,6 @@
 import { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } from 'discord.js';
 import { successEmbed, errorEmbed } from '../../utils/embeds.js';
+import { assertBotPermissions, FEATURE_BOT_PERMISSIONS } from '../../utils/permissions.js';
 
 export default {
   data: new SlashCommandBuilder()
@@ -16,7 +17,7 @@ export default {
         .setRequired(true)))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 
-  defaultLevel: 'admin',
+  defaultLevel: 'public',
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
@@ -27,6 +28,13 @@ export default {
       if (!interaction.deferred && !interaction.replied) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       }
+
+      const hasRequiredPermissions = await assertBotPermissions(
+        interaction,
+        FEATURE_BOT_PERMISSIONS.purge,
+        { featureName: '`/purge` in this channel' },
+      );
+      if (!hasRequiredPermissions) return;
 
       if (!interaction.channel.permissionsFor(interaction.guild.members.me).has(PermissionFlagsBits.ManageMessages)) {
         return interaction.editReply({ embeds: [errorEmbed('I need the **Manage Messages** permission to delete messages.')] });
