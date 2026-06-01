@@ -8,7 +8,7 @@ import { WelcomeConfig } from '../storage/WelcomeConfig.js';
 import { WelcomeWizardSession } from '../storage/WelcomeWizardSession.js';
 import { embed, Colors, errorEmbed } from '../utils/embeds.js';
 import { THEMES, buildWelcomePayload, DEFAULT_MESSAGES } from '../utils/welcomeCard.js';
-import { isAdmin } from '../utils/permissions.js';
+import { isAdmin, assertBotPermissions, FEATURE_BOT_PERMISSIONS } from '../utils/permissions.js';
 import { logger } from '../utils/logger.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -561,6 +561,13 @@ export async function handleWelcomeInteraction(interaction, parts) {
         if (!session.channelId) {
           return interaction.reply({ embeds: [errorEmbed('Please set a channel first (Step 1).')], flags: 64 });
         }
+        const targetChannel = await interaction.guild.channels.fetch(session.channelId).catch(() => null);
+        const hasRequiredPermissions = await assertBotPermissions(
+          interaction,
+          FEATURE_BOT_PERMISSIONS.welcomeGoodbye,
+          { channel: targetChannel, featureName: `${section} messages in the selected channel` },
+        );
+        if (!hasRequiredPermissions) return;
         WelcomeConfig.updateSection(interaction.guildId, section, {
           channelId:     session.channelId,
           message:       session.message        || null,

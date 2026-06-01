@@ -3,6 +3,7 @@ import { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Chan
 import { Plan } from '../../storage/Plan.js';
 import { GuildConfig } from '../../storage/GuildConfig.js';
 import { successEmbed, errorEmbed, planEmbed, embed, Colors } from '../../utils/embeds.js';
+import { assertBotPermissions, FEATURE_BOT_PERMISSIONS } from '../../utils/permissions.js';
 
 function buyButtonFor(plan) {
   return new ButtonBuilder()
@@ -73,6 +74,15 @@ export default {
       });
 
       const row = new ActionRowBuilder().addComponents(buyButtonFor(plan));
+      const requiredPermissions = (plan.thumbnail || plan.banner)
+        ? FEATURE_BOT_PERMISSIONS.postWithImages
+        : FEATURE_BOT_PERMISSIONS.postBase;
+      const hasRequiredPermissions = await assertBotPermissions(
+        interaction,
+        requiredPermissions,
+        { channel: targetCh, featureName: 'plan posting in the target channel' },
+      );
+      if (!hasRequiredPermissions) return;
 
       try {
         await targetCh.send({ embeds: [planEmbed(plan)], components: [row] });

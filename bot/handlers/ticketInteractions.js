@@ -9,7 +9,14 @@ import { Cooldown } from '../storage/Cooldown.js';
 import { GuildConfig } from '../storage/GuildConfig.js';
 import { Plan } from '../storage/Plan.js';
 import { embed, successEmbed, errorEmbed, Colors } from '../utils/embeds.js';
-import { isAdmin, isStaff, canCloseTicket, canClaimTicket } from '../utils/permissions.js';
+import {
+  isAdmin,
+  isStaff,
+  canCloseTicket,
+  canClaimTicket,
+  assertBotPermissions,
+  FEATURE_BOT_PERMISSIONS,
+} from '../utils/permissions.js';
 import { generateTranscript } from '../utils/transcript.js';
 import { logger } from '../utils/logger.js';
 
@@ -138,6 +145,13 @@ async function createTicketChannel(interaction, panel, ticketType, modalAnswers)
   const member = interaction.member;
 
   try {
+    const hasRequiredPermissions = await assertBotPermissions(
+      interaction,
+      FEATURE_BOT_PERMISSIONS.ticket,
+      { featureName: 'ticket creation' },
+    );
+    if (!hasRequiredPermissions) return;
+
     const ticketNumber = Ticket.nextNumber(guild.id);
     const name = (panel.namingFormat ?? 'ticket-{username}')
       .replace('{username}', member.user.username.toLowerCase().replace(/[^a-z0-9]/g, ''))
@@ -151,7 +165,17 @@ async function createTicketChannel(interaction, panel, ticketType, modalAnswers)
     const overwrites = [
       { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
       { id: member.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-      { id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ReadMessageHistory] },
+      {
+        id: guild.members.me.id,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ManageChannels,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.EmbedLinks,
+          PermissionFlagsBits.AttachFiles,
+        ],
+      },
     ];
 
     const supportRoles = [...(panel.allowedRoles ?? []), ...(ticketType?.supportRoles ?? [])];

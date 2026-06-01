@@ -11,7 +11,7 @@ export const HELP_MENU_CUSTOM_ID = 'help:menu';
 // Disable help dropdown after 2 minutes of inactivity.
 export const HELP_MENU_IDLE_MS = 120_000;
 const SUPPORT_SERVER_URL = 'https://discord.gg/FT83j6mrg';
-const ADD_BOT_URL = 'https://discord.com/oauth2/authorize?client_id=1495354060507709621&permissions=8&scope=bot%20applications.commands';
+const ADD_BOT_URL = 'https://discord.com/oauth2/authorize?client_id=1495354060507709621&permissions=125968&scope=bot%20applications.commands';
 const LEAVE_REVIEW_URL = 'https://top.gg/bot/1495354060507709621#reviews';
 const REVIEW_CTA_TEXT = "If you're enjoying Mr. Manager, please consider leaving a review on Top.gg!";
 

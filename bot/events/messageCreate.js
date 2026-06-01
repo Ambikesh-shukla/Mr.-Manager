@@ -7,6 +7,7 @@ import { LinkConfig } from '../storage/LinkConfig.js';
 import { handleWizardMessage } from '../handlers/setupHandler.js';
 import { handlePostEmbedWizardMessage } from '../handlers/postHandler.js';
 import { logger } from '../utils/logger.js';
+import { FEATURE_BOT_PERMISSIONS, getMissingBotPermissions } from '../utils/permissions.js';
 
 const afkMentionCooldown = new Map();
 const COOLDOWN_MS = 30_000;
@@ -86,6 +87,11 @@ export default {
       if (!canBypass && linkCfg.allowedUsers.includes(message.author.id)) canBypass = true;
 
       if (!canBypass) {
+        const missing = getMissingBotPermissions(message.channel, FEATURE_BOT_PERMISSIONS.linkBlock);
+        if (missing.length > 0) {
+          logger.warn(`Skipping link-block enforcement in guild ${message.guild.id}: missing permissions (${missing.join(', ')})`);
+          return;
+        }
         try {
           await message.delete();
         } catch (err) {
